@@ -1,3 +1,9 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/susidewiyuliyanti/INTEGRITAS360/main/logo.png" width="250" alt="INTEGRITAS360">
+  <img src="./logo.png" width="250">
+</p>
+
+<h1 align="center">INTEGRITAS360</h1>
+
+<p align="center">
+  <strong>Platform Keamanan & Integritas Data 360°</strong>
 </p>
