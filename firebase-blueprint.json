@@ -1,0 +1,171 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with role (owner, perusahaan, auditor) and financial wallets",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "Email address of the user"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["owner", "perusahaan", "auditor"],
+          "description": "Role of the user in Integritas360"
+        },
+        "namaPT": {
+          "type": "string",
+          "description": "Company name or Auditor name"
+        },
+        "sektor": {
+          "type": "string",
+          "description": "Industry sector or audit specialization"
+        },
+        "alamat": {
+          "type": "string",
+          "description": "Address"
+        },
+        "deskripsi": {
+          "type": "string",
+          "description": "Brief description of company or auditor credentials"
+        },
+        "telepon": {
+          "type": "string",
+          "description": "Official contact phone number"
+        },
+        "npwp": {
+          "type": "string",
+          "description": "Tax Identification Number (NPWP) or Business License (NIB)"
+        },
+        "picName": {
+          "type": "string",
+          "description": "Compliance Officer or Person in Charge"
+        },
+        "danaTersedia": {
+          "type": "number",
+          "description": "Available funds allocated for whistleblowing management and displayed on poster"
+        },
+        "saldo": {
+          "type": "number",
+          "description": "Active free wallet balance for deposit and withdrawal"
+        },
+        "danaTerkunci": {
+          "type": "number",
+          "description": "Locked integrity compliance funds"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": ["email", "role"]
+    },
+    "Report": {
+      "title": "Report",
+      "description": "Whistleblowing report submitted by public or employee",
+      "type": "object",
+      "properties": {
+        "companyId": {
+          "type": "string",
+          "description": "Target company UID"
+        },
+        "companyName": {
+          "type": "string",
+          "description": "Target company name"
+        },
+        "judul": {
+          "type": "string",
+          "description": "Report title / headline"
+        },
+        "kategori": {
+          "type": "string",
+          "description": "Category of incident: Korupsi, Pelecehan, Fraud, dll"
+        },
+        "deskripsi": {
+          "type": "string",
+          "description": "Detailed incident report"
+        },
+        "tanggalKejadian": {
+          "type": "string",
+          "description": "Date when incident occurred"
+        },
+        "lokasi": {
+          "type": "string",
+          "description": "Location of incident"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["baru", "proses", "selesai", "ditolak"],
+          "description": "Investigation status"
+        },
+        "tokenAkses": {
+          "type": "string",
+          "description": "Secret token for reporter to track status anonymously"
+        },
+        "catatanAuditor": {
+          "type": "string",
+          "description": "Auditor investigation notes"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["companyId", "judul", "deskripsi"]
+    },
+    "WalletTransaction": {
+      "title": "WalletTransaction",
+      "description": "Financial ledger transactions including deposit, withdrawal, lock, and unlock",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "UID of the user performing the transaction"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["deposit", "withdrawal", "lock", "unlock"],
+          "description": "Type of transaction"
+        },
+        "amount": {
+          "type": "number",
+          "description": "Transaction nominal in Rupiah"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["selesai", "pending", "dibatalkan"],
+          "description": "Execution status"
+        },
+        "keterangan": {
+          "type": "string",
+          "description": "Transaction notes or bank destination details"
+        },
+        "metode": {
+          "type": "string",
+          "description": "Payment method used (e.g. Virtual Account, Bank Transfer)"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["userId", "type", "amount"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Users collection with owner, perusahaan, and auditor profiles and balances"
+    },
+    "/reports/{reportId}": {
+      "schema": "Report",
+      "description": "Whistleblowing reports collection"
+    },
+    "/transactions/{transactionId}": {
+      "schema": "WalletTransaction",
+      "description": "Ledger of deposits, withdrawals, and lock/unlock actions"
+    }
+  }
+}
