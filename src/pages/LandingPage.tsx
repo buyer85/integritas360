@@ -36,6 +36,19 @@ export const LandingPage: React.FC = () => {
 
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto space-y-6">
+            <div className="flex justify-center">
+              <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-amber-500 to-amber-300 p-0.5 shadow-2xl shadow-amber-500/25">
+                <div className="w-full h-full bg-slate-900 rounded-[22px] flex items-center justify-center overflow-hidden">
+                  <img
+                    src="/logo.png"
+                    alt="INTEGRITAS360 Official Logo"
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              </div>
+            </div>
+
             <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-semibold">
               <ShieldCheck className="w-4 h-4" />
               Platform Whistleblowing Independen Terintegrasi Nasional
@@ -52,7 +65,9 @@ export const LandingPage: React.FC = () => {
               Sistem pelaporan pelanggaran etika dan kecurangan (Whistleblowing) terenkripsi mandiri.
               Menghubungkan <span className="text-amber-400 font-semibold">Perusahaan Patuh</span> dan{' '}
               <span className="text-emerald-400 font-semibold">Auditor Independen</span>.{' '}
-              <span className="text-emerald-400 font-bold underline decoration-emerald-500/40 underline-offset-4">Pelapor di jamin Anonim.</span>
+              <span className="text-emerald-400 font-bold underline decoration-emerald-500/40 underline-offset-4">
+                Pelapor 100% Anonim Tanpa Harus Login Akun Google.
+              </span>
             </p>
 
             {/* CTA Buttons */}
@@ -81,7 +96,7 @@ export const LandingPage: React.FC = () => {
                 className="px-6 py-3.5 rounded-xl bg-gradient-to-r from-red-600 via-rose-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-bold text-sm shadow-xl shadow-red-600/25 flex items-center gap-2 transition-all cursor-pointer ring-2 ring-red-500/30"
               >
                 <ShieldAlert className="w-4 h-4" />
-                Form Pelaporan (Lapor Anonim)
+                Form Pelaporan (Tanpa Login - 100% Anonim)
               </button>
 
               {user ? (
@@ -105,7 +120,7 @@ export const LandingPage: React.FC = () => {
                   className="px-6 py-3.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-bold text-sm shadow-xl shadow-amber-500/25 flex items-center gap-2 transition-all cursor-pointer"
                 >
                   <Building2 className="w-4 h-4" />
-                  <span>Masuk / Daftar (PT & Auditor)</span>
+                  <span>Portal Masuk (Khusus PT & Auditor)</span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
               )}

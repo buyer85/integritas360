@@ -40,6 +40,7 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import { UserProfile, WalletTransaction, BankDetails } from '../types';
+import { QrisStaticCard } from '../components/QrisStaticCard';
 
 const SEKTOR_OPTIONS = [
   'Manufaktur & Pabrikasi',
@@ -94,7 +95,7 @@ export const ProfilePage: React.FC = () => {
   // Modal Keuangan States
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [depositAmount, setDepositAmount] = useState<number>(5000000);
-  const [depositMethod, setDepositMethod] = useState('BCA Virtual Account');
+  const [depositMethod, setDepositMethod] = useState('QRIS Statis Nasional (INTEGRITAS360)');
   const [processingDeposit, setProcessingDeposit] = useState(false);
 
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
@@ -489,8 +490,14 @@ export const ProfilePage: React.FC = () => {
               <div className="space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <h1 className="text-xl sm:text-2xl font-black text-white">
-                    {profileData?.namaPT || 'Lengkapi Nama Anda'}
+                    {profileData?.namaPT || (profileData?.role === 'auditor' ? 'Auditor Independen' : 'Lengkapi Nama Anda')}
                   </h1>
+                  {profileData?.statusVerifikasiDokumen === 'terverifikasi' && (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-xs font-bold shadow-sm shadow-emerald-500/10">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                      Terverifikasi
+                    </span>
+                  )}
                   <span
                     className={`text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full border ${
                       profileData?.role === 'owner'
@@ -505,8 +512,12 @@ export const ProfilePage: React.FC = () => {
                 </div>
                 <p className="text-xs text-slate-400 font-mono">{user?.email}</p>
                 <div className="flex items-center gap-3 text-xs text-slate-400 pt-1">
-                  <span>Sektor: <strong className="text-slate-300">{profileData?.sektor || '-'}</strong></span>
-                  <span>•</span>
+                  {profileData?.role !== 'auditor' && (
+                    <>
+                      <span>Sektor: <strong className="text-slate-300">{profileData?.sektor || '-'}</strong></span>
+                      <span>•</span>
+                    </>
+                  )}
                   <span>PIC: <strong className="text-slate-300">{profileData?.picName || 'Belum diisi'}</strong></span>
                 </div>
               </div>
@@ -515,18 +526,24 @@ export const ProfilePage: React.FC = () => {
             {/* Quick Balance Status in Header */}
             <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex items-center gap-4">
               <div>
-                <p className="text-[10px] uppercase font-semibold text-slate-400">Total Aset Integritas</p>
+                <p className="text-[10px] uppercase font-semibold text-slate-400">
+                  {profileData?.role === 'auditor' ? 'Saldo Honorarium Audit' : 'Total Aset Integritas'}
+                </p>
                 <p className="text-xl sm:text-2xl font-mono font-bold text-amber-400">
-                  Rp {totalAset.toLocaleString('id-ID')}
+                  Rp {(profileData?.role === 'auditor' ? currentSaldo : totalAset).toLocaleString('id-ID')}
                 </p>
               </div>
-              <div className="h-8 w-px bg-slate-800" />
-              <div>
-                <p className="text-[10px] uppercase font-semibold text-slate-400">Dana Terkunci</p>
-                <p className="text-sm font-mono font-bold text-emerald-400">
-                  Rp {currentDanaTerkunci.toLocaleString('id-ID')}
-                </p>
-              </div>
+              {profileData?.role !== 'auditor' && (
+                <>
+                  <div className="h-8 w-px bg-slate-800" />
+                  <div>
+                    <p className="text-[10px] uppercase font-semibold text-slate-400">Dana Terkunci</p>
+                    <p className="text-sm font-mono font-bold text-emerald-400">
+                      Rp {currentDanaTerkunci.toLocaleString('id-ID')}
+                    </p>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -541,7 +558,9 @@ export const ProfilePage: React.FC = () => {
               }`}
             >
               <Wallet className="w-4 h-4" />
-              Dompet & Keuangan (Saldo, Deposit, Withdraw, Lock)
+              {profileData?.role === 'auditor'
+                ? 'Dompet & Keuangan (Saldo Honorarium & Penarikan)'
+                : 'Dompet & Keuangan (Saldo, Deposit, Withdraw, Lock)'}
             </button>
 
             <button
@@ -574,12 +593,12 @@ export const ProfilePage: React.FC = () => {
         {activeTab === 'keuangan' && (
           <div className="space-y-6">
             {/* Balance Overview Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-              {/* Card 1: Saldo Aktif */}
+            <div className={`grid grid-cols-1 ${profileData?.role === 'auditor' ? 'md:grid-cols-2' : 'md:grid-cols-3'} gap-5`}>
+              {/* Card 1: Saldo Aktif / Honorarium */}
               <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-xs font-bold uppercase tracking-wider text-blue-400">
-                    Saldo Bebas (Aktif)
+                    {profileData?.role === 'auditor' ? 'Saldo Honorarium Investigasi' : 'Saldo Bebas (Aktif)'}
                   </span>
                   <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
                     <Banknote className="w-4 h-4" />
@@ -589,17 +608,21 @@ export const ProfilePage: React.FC = () => {
                   Rp {currentSaldo.toLocaleString('id-ID')}
                 </div>
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  Saldo yang dapat ditarik (*withdrawal*) kapan saja atau dipindahkan ke Lock Dana penjaminan.
+                  {profileData?.role === 'auditor'
+                    ? 'Saldo dari honorarium verifikasi kasus yang divalidasi dan dirilis. Bebas ditarik (withdrawal) kapan saja ke rekening bank Anda.'
+                    : 'Saldo yang dapat ditarik (*withdrawal*) kapan saja atau dipindahkan ke Lock Dana penjaminan.'}
                 </p>
 
                 <div className="flex items-center gap-2 mt-5 pt-4 border-t border-slate-800">
-                  <button
-                    onClick={() => setShowDepositModal(true)}
-                    className="flex-1 py-2 px-3 rounded-xl bg-blue-500 hover:bg-blue-400 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    <ArrowDownLeft className="w-3.5 h-3.5" />
-                    Deposit Saldo
-                  </button>
+                  {profileData?.role !== 'auditor' && (
+                    <button
+                      onClick={() => setShowDepositModal(true)}
+                      className="flex-1 py-2 px-3 rounded-xl bg-blue-500 hover:bg-blue-400 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <ArrowDownLeft className="w-3.5 h-3.5" />
+                      Deposit Saldo
+                    </button>
+                  )}
                   <button
                     onClick={() => {
                       setWithdrawError('');
@@ -613,49 +636,51 @@ export const ProfilePage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Card 2: Lock Dana (Dana Terkunci) */}
-              <div className="bg-slate-900/90 border border-emerald-500/30 rounded-2xl p-6 shadow-xl relative overflow-hidden">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
-                    <Lock className="w-3.5 h-3.5" />
-                    Lock Dana (Dana Terkunci)
-                  </span>
-                  <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                    <ShieldCheck className="w-4 h-4" />
+              {/* Card 2: Lock Dana (Dana Terkunci) - Khusus Perusahaan, tidak untuk Auditor */}
+              {profileData?.role !== 'auditor' && (
+                <div className="bg-slate-900/90 border border-emerald-500/30 rounded-2xl p-6 shadow-xl relative overflow-hidden">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                      <Lock className="w-3.5 h-3.5" />
+                      Lock Dana (Dana Terkunci)
+                    </span>
+                    <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                      <ShieldCheck className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <div className="text-2xl sm:text-3xl font-black font-mono text-emerald-400 mb-2">
+                    Rp {currentDanaTerkunci.toLocaleString('id-ID')}
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    Dana jaminan integritas whistleblowing (ISO 37002). Nominal ini otomatis tertera pada poster resmi PT.
+                  </p>
+
+                  <div className="flex items-center gap-2 mt-5 pt-4 border-t border-slate-800">
+                    <button
+                      onClick={() => {
+                        setLockActionType('lock');
+                        setLockError('');
+                        setShowLockModal(true);
+                      }}
+                      className="flex-1 py-2 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Lock className="w-3.5 h-3.5" />
+                      Kunci Dana
+                    </button>
+                    <button
+                      onClick={() => {
+                        setLockActionType('unlock');
+                        setLockError('');
+                        setShowLockModal(true);
+                      }}
+                      className="flex-1 py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Unlock className="w-3.5 h-3.5 text-amber-400" />
+                      Buka Kunci
+                    </button>
                   </div>
                 </div>
-                <div className="text-2xl sm:text-3xl font-black font-mono text-emerald-400 mb-2">
-                  Rp {currentDanaTerkunci.toLocaleString('id-ID')}
-                </div>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  Dana jaminan integritas whistleblowing (ISO 37002). Nominal ini otomatis tertera pada poster resmi PT.
-                </p>
-
-                <div className="flex items-center gap-2 mt-5 pt-4 border-t border-slate-800">
-                  <button
-                    onClick={() => {
-                      setLockActionType('lock');
-                      setLockError('');
-                      setShowLockModal(true);
-                    }}
-                    className="flex-1 py-2 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    <Lock className="w-3.5 h-3.5" />
-                    Kunci Dana
-                  </button>
-                  <button
-                    onClick={() => {
-                      setLockActionType('unlock');
-                      setLockError('');
-                      setShowLockModal(true);
-                    }}
-                    className="flex-1 py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    <Unlock className="w-3.5 h-3.5 text-amber-400" />
-                    Buka Kunci
-                  </button>
-                </div>
-              </div>
+              )}
 
               {/* Card 3: Rekening Bank Penarikan */}
               <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col justify-between">
@@ -686,19 +711,31 @@ export const ProfilePage: React.FC = () => {
               </div>
             </div>
 
-            {/* Information Box on Dana Kepatuhan */}
-            <div className="p-4 rounded-2xl bg-slate-900/70 border border-slate-800 text-xs text-slate-300 space-y-2">
-              <div className="flex items-center gap-2 text-amber-400 font-bold">
-                <ShieldCheck className="w-4 h-4" />
-                Mekanisme Penjaminan Integritas & Kepatuhan
+            {/* Information Box on Dana Kepatuhan (Perusahaan) atau Honorarium (Auditor) */}
+            {profileData?.role !== 'auditor' ? (
+              <div className="p-4 rounded-2xl bg-slate-900/70 border border-slate-800 text-xs text-slate-300 space-y-2">
+                <div className="flex items-center gap-2 text-amber-400 font-bold">
+                  <ShieldCheck className="w-4 h-4" />
+                  Mekanisme Penjaminan Integritas & Kepatuhan
+                </div>
+                <p className="text-slate-400 leading-relaxed">
+                  Setiap perusahaan peserta diwajibkan mengalokasikan <strong>Lock Dana</strong> sebagai wujud
+                  komitmen penjaminan perlindungan saksi, imbalan pelapor berintegritas, serta pembiayaan audit
+                  independen. Dana yang dikunci tidak dapat ditarik secara sepihak selama proses investigasi aduan
+                  whistleblowing sedang berlangsung.
+                </p>
               </div>
-              <p className="text-slate-400 leading-relaxed">
-                Setiap perusahaan peserta diwajibkan mengalokasikan <strong>Lock Dana</strong> sebagai wujud
-                komitmen penjaminan perlindungan saksi, imbalan pelapor berintegritas, serta pembiayaan audit
-                independen. Dana yang dikunci tidak dapat ditarik secara sepihak selama proses investigasi aduan
-                whistleblowing sedang berlangsung.
-              </p>
-            </div>
+            ) : (
+              <div className="p-4 rounded-2xl bg-slate-900/70 border border-blue-500/20 text-xs text-slate-300 space-y-2">
+                <div className="flex items-center gap-2 text-blue-400 font-bold">
+                  <ShieldCheck className="w-4 h-4" />
+                  Honorarium Jasa Audit Independen
+                </div>
+                <p className="text-slate-400 leading-relaxed">
+                  Sebagai Auditor Independen, Anda menerima honorarium jasa audit dari setiap laporan yang diverifikasi valid dan dirilis oleh perusahaan atau sistem (maksimal 1x24 jam). Saldo honorarium yang masuk bersifat cair (*liquid*) dan dapat ditarik (*withdrawal*) kapan saja tanpa mekanisme dana terkunci (*lock*).
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -730,50 +767,59 @@ export const ProfilePage: React.FC = () => {
             )}
 
             <form onSubmit={handleSaveProfile} className="space-y-6">
-              {/* Bagian 1: Data Perusahaan */}
+              {/* Bagian 1: Data Perusahaan / Auditor */}
               <div className="space-y-4">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
                   <Building2 className="w-3.5 h-3.5" />
-                  1. Informasi Perusahaan / Institusi
+                  {profileData?.role === 'auditor' ? '1. Informasi Kantor Hukum / Praktisi Auditor' : '1. Informasi Perusahaan / Institusi'}
                 </h3>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className={`grid grid-cols-1 ${profileData?.role === 'auditor' ? '' : 'sm:grid-cols-2'} gap-4`}>
                   <div>
                     <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                      Nama Perusahaan / PT / Institusi *
+                      {profileData?.role === 'auditor' ? 'Nama Kantor Hukum' : 'Nama Perusahaan / PT / Institusi *'}
+                      {profileData?.role === 'auditor' && (
+                        <span className="text-slate-400 font-normal ml-1.5 text-[11px]">(Boleh dikosongkan)</span>
+                      )}
                     </label>
                     <input
                       type="text"
-                      required
+                      required={profileData?.role !== 'auditor'}
                       value={namaPT}
                       onChange={(e) => setNamaPT(e.target.value)}
-                      placeholder="Contoh: PT Sumber Integritas Nusantara"
+                      placeholder={
+                        profileData?.role === 'auditor'
+                          ? 'Nama kantor hukum / konsultan (kosongkan jika perorangan)'
+                          : 'Contoh: PT Sumber Integritas Nusantara'
+                      }
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                      Sektor Industri *
-                    </label>
-                    <select
-                      value={sektor}
-                      onChange={(e) => setSektor(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
-                    >
-                      {SEKTOR_OPTIONS.map((opt) => (
-                        <option key={opt} value={opt}>
-                          {opt}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  {profileData?.role !== 'auditor' && (
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                        Sektor Industri *
+                      </label>
+                      <select
+                        value={sektor}
+                        onChange={(e) => setSektor(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                      >
+                        {SEKTOR_OPTIONS.map((opt) => (
+                          <option key={opt} value={opt}>
+                            {opt}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                      Nomor Pokok Wajib Pajak (NPWP) / NIB
+                      {profileData?.role === 'auditor' ? 'Nomor NPWP / NIK' : 'Nomor Pokok Wajib Pajak (NPWP) / NIB'}
                     </label>
                     <input
                       type="text"
@@ -799,14 +845,18 @@ export const ProfilePage: React.FC = () => {
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Alamat Lengkap Kantor / Pabrik *
+                    {profileData?.role === 'auditor' ? 'Alamat sesuai KTP *' : 'Alamat Lengkap Kantor *'}
                   </label>
                   <textarea
                     rows={2}
                     required
                     value={alamat}
                     onChange={(e) => setAlamat(e.target.value)}
-                    placeholder="Alamat kantor pusat, gedung, lantai, dan kota..."
+                    placeholder={
+                      profileData?.role === 'auditor'
+                        ? 'Alamat domisili lengkap sesuai KTP...'
+                        : 'Alamat kantor pusat, gedung, lantai, dan kota...'
+                    }
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
                   />
                 </div>
@@ -943,7 +993,7 @@ export const ProfilePage: React.FC = () => {
                 <div className="p-3 bg-amber-500/5 rounded-xl border border-amber-500/20 text-xs text-amber-200/90 leading-relaxed flex items-start gap-2.5">
                   <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                   <div>
-                    <strong>Ketentuan Verifikasi:</strong> Dokumen perusahaan (NIB/SIUP/Akta) dan dokumen auditor (SKKNI/ACFE/KTP) akan diverifikasi secara langsung oleh Administrator INTEGRITAS360.
+                    <strong>Ketentuan Verifikasi:</strong> Dokumen legalitas perusahaan (NIB/SIUP/Akta) dan dokumen lisensi auditor (SKKNI/ACFE/KTP) untuk menjamin keabsahan akun dan kepatuhan sistem.
                   </div>
                 </div>
 
@@ -1164,102 +1214,122 @@ export const ProfilePage: React.FC = () => {
         )}
       </div>
 
-      {/* MODAL 1: DEPOSIT SALDO */}
+      {/* MODAL 1: DEPOSIT SALDO DENGAN QRIS STATIS */}
       {showDepositModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-5">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm overflow-y-auto">
+          <div className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-5 my-6">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <ArrowDownLeft className="w-5 h-5 text-blue-400" />
-                Deposit Saldo Aktif
+                Deposit Saldo Aktif Perusahaan (QRIS Statis)
               </h3>
               <button
                 onClick={() => setShowDepositModal(false)}
-                className="text-slate-400 hover:text-white text-xs cursor-pointer"
+                className="text-slate-400 hover:text-white text-xs cursor-pointer p-1"
               >
                 ✕
               </button>
             </div>
 
-            <form onSubmit={handleDepositSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Nominal Deposit (Rupiah)
-                </label>
-                <input
-                  type="number"
-                  min={500000}
-                  step={500000}
-                  required
-                  value={depositAmount}
-                  onChange={(e) => setDepositAmount(Number(e.target.value))}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-base font-mono font-bold text-blue-400 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-
-              {/* Quick Presets */}
-              <div className="grid grid-cols-3 gap-2">
-                {[2000000, 5000000, 10000000, 25000000, 50000000].map((amt) => (
-                  <button
-                    key={amt}
-                    type="button"
-                    onClick={() => setDepositAmount(amt)}
-                    className={`py-1.5 px-2 rounded-lg text-xs font-mono transition-colors border cursor-pointer ${
-                      depositAmount === amt
-                        ? 'bg-blue-500/20 text-blue-400 border-blue-500/40 font-bold'
-                        : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
-                    }`}
-                  >
-                    +{amt / 1000000} Jt
-                  </button>
-                ))}
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Metode Pembayaran Deposit
-                </label>
-                <select
-                  value={depositMethod}
-                  onChange={(e) => setDepositMethod(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500"
-                >
-                  <option value="BCA Virtual Account">BCA Virtual Account (Otomatis)</option>
-                  <option value="Mandiri Virtual Account">Mandiri Virtual Account</option>
-                  <option value="BRI Virtual Account">BRI Virtual Account (BRIVA)</option>
-                  <option value="BNI Virtual Account">BNI Virtual Account</option>
-                  <option value="QRIS Integritas360">QRIS Dinamis (Semua E-Wallet & M-Banking)</option>
-                  <option value="Transfer Manual Bank">Transfer Manual Bank Perusahaan</option>
-                </select>
-              </div>
-
-              <div className="p-3 bg-amber-500/10 rounded-xl border border-amber-500/20 text-[11px] text-amber-200/90 space-y-1">
-                <div className="font-bold flex items-center gap-1.5 text-amber-300">
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  Verifikasi Administrator
-                </div>
-                <p>
-                  Permintaan deposit akan diverifikasi dan disetujui oleh Administrator sebelum saldo aktif ditambahkan ke akun Anda.
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+              {/* Kolom Kiri: Tampilan QRIS Statis Resmi */}
+              <div className="flex flex-col items-center">
+                <p className="text-xs font-semibold text-slate-300 mb-2 text-center">
+                  Pindai QRIS Statis Resmi INTEGRITAS360
                 </p>
+                <QrisStaticCard nominal={depositAmount} />
               </div>
 
-              <div className="pt-2 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowDepositModal(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700 cursor-pointer"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  disabled={processingDeposit}
-                  className="px-5 py-2 rounded-xl bg-blue-500 hover:bg-blue-400 text-white text-xs font-bold transition-all shadow-lg shadow-blue-500/20 disabled:opacity-60 cursor-pointer"
-                >
-                  {processingDeposit ? 'Memproses Deposit...' : 'Kirim Permintaan Deposit'}
-                </button>
-              </div>
-            </form>
+              {/* Kolom Kanan: Form Input Nominal & Konfirmasi */}
+              <form onSubmit={handleDepositSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Nominal Deposit (Rupiah) *
+                  </label>
+                  <input
+                    type="number"
+                    min={500000}
+                    step={500000}
+                    required
+                    value={depositAmount}
+                    onChange={(e) => setDepositAmount(Number(e.target.value))}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-base font-mono font-bold text-blue-400 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                {/* Quick Presets */}
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                    Pilihan Cepat Nominal:
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[2000000, 5000000, 10000000, 25000000, 50000000].map((amt) => (
+                      <button
+                        key={amt}
+                        type="button"
+                        onClick={() => setDepositAmount(amt)}
+                        className={`py-1.5 px-2 rounded-lg text-xs font-mono transition-colors border cursor-pointer ${
+                          depositAmount === amt
+                            ? 'bg-blue-500/20 text-blue-400 border-blue-500/40 font-bold'
+                            : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                        }`}
+                      >
+                        +{amt / 1000000} Jt
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Metode Pembayaran
+                  </label>
+                  <select
+                    value={depositMethod}
+                    onChange={(e) => setDepositMethod(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="QRIS Statis Nasional (INTEGRITAS360)">
+                      QRIS Statis Nasional (Semua Bank & E-Wallet)
+                    </option>
+                    <option value="BCA Virtual Account">BCA Virtual Account</option>
+                    <option value="Mandiri Virtual Account">Mandiri Virtual Account</option>
+                    <option value="BRI Virtual Account">BRI Virtual Account (BRIVA)</option>
+                    <option value="BNI Virtual Account">BNI Virtual Account</option>
+                    <option value="Transfer Manual Bank">Transfer Rekening Bank</option>
+                  </select>
+                </div>
+
+                <div className="p-3 bg-blue-500/10 rounded-xl border border-blue-500/20 text-[11px] text-blue-200 leading-relaxed space-y-1">
+                  <div className="font-bold flex items-center gap-1.5 text-blue-300">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    Panduan Pembayaran QRIS:
+                  </div>
+                  <ol className="list-decimal list-inside space-y-1 text-slate-300">
+                    <li>Pindai QRIS Statis di samping via M-Banking / E-Wallet.</li>
+                    <li>Ketik nominal deposit: <strong>Rp {depositAmount.toLocaleString('id-ID')}</strong>.</li>
+                    <li>Selesaikan pembayaran dan klik tombol di bawah untuk notifikasi ke Administrator.</li>
+                  </ol>
+                </div>
+
+                <div className="pt-2 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowDepositModal(false)}
+                    className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700 cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={processingDeposit}
+                    className="px-5 py-2 rounded-xl bg-blue-500 hover:bg-blue-400 text-white text-xs font-bold transition-all shadow-lg shadow-blue-500/20 disabled:opacity-60 cursor-pointer"
+                  >
+                    {processingDeposit ? 'Memproses...' : 'Konfirmasi Sudah Transfer'}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
       )}

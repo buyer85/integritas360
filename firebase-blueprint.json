@@ -54,6 +54,18 @@
           "type": "number",
           "description": "Locked integrity compliance funds"
         },
+        "biayaJasaPerKasus": {
+          "type": "number",
+          "description": "Auditor investigation fee per case (min 100000, default 150000)"
+        },
+        "isLocked": {
+          "type": "boolean",
+          "description": "Whether the company funds or account are locked by administrator"
+        },
+        "lockReason": {
+          "type": "string",
+          "description": "Reason for fund lock set by administrator"
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time",
@@ -97,12 +109,25 @@
         },
         "status": {
           "type": "string",
-          "enum": ["baru", "proses", "selesai", "ditolak"],
+          "enum": ["baru", "proses", "valid", "selesai", "ditolak"],
           "description": "Investigation status"
         },
         "tokenAkses": {
           "type": "string",
           "description": "Secret token for reporter to track status anonymously"
+        },
+        "biayaAuditor": {
+          "type": "number",
+          "description": "Auditor fee per report"
+        },
+        "companyCaseStatus": {
+          "type": "string",
+          "enum": ["menunggu_ambil", "kasus_diambil", "sanksi_ditetapkan", "selesai"],
+          "description": "Company workflow status for report"
+        },
+        "rewardReleased": {
+          "type": "boolean",
+          "description": "Whether reward is released and company lock balance deducted"
         },
         "catatanAuditor": {
           "type": "string",

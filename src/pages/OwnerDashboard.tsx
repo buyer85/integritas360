@@ -6,11 +6,12 @@ import {
   onSnapshot,
   doc,
   updateDoc,
+  deleteDoc,
+  addDoc,
   increment,
-  serverTimestamp,
-  getDocs
+  serverTimestamp
 } from 'firebase/firestore';
-import { db, OWNER_EMAIL } from '../lib/firebase';
+import { db, OWNER_EMAIL, isOwnerEmail } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '../context/NavigationContext';
 import {
@@ -19,31 +20,42 @@ import {
   Building2,
   Eye,
   Wallet,
-  PlusCircle,
-  Download,
-  Search,
-  CheckCircle2,
-  RefreshCw,
-  ArrowUpRight,
-  TrendingUp,
   FileCheck,
-  FileText,
-  ExternalLink,
-  Clock,
-  XCircle,
-  AlertTriangle,
   CreditCard,
-  ArrowDownLeft,
   Award,
-  Banknote,
+  RefreshCw,
+  Coins,
+  FileText,
+  Filter,
   Check,
   X,
+  ExternalLink,
   MessageCircle,
-  Filter
+  ArrowDownLeft,
+  ArrowUpRight,
+  Clock,
+  AlertTriangle,
+  Lock,
+  Unlock,
+  Trash2
 } from 'lucide-react';
-import { UserProfile } from '../types';
+import { UserProfile, WhistleblowingReport } from '../types';
 import { PosterModal } from '../components/PosterModal';
 import { PosterOptions } from '../utils/posterGenerator';
+
+// Modular Admin Components
+import { AdminBalanceOverview } from '../components/admin/AdminBalanceOverview';
+import { AdminPerusahaanTable } from '../components/admin/AdminPerusahaanTable';
+import { AdminAuditorTable } from '../components/admin/AdminAuditorTable';
+import { AdminReportsManager } from '../components/admin/AdminReportsManager';
+import {
+  LockModal,
+  EditSaldoModal,
+  EditAuditorSaldoModal,
+  EditProfileModal,
+  EditReportModal,
+  ConfirmDeleteModal
+} from '../components/admin/AdminModals';
 
 interface AdminTransaction {
   id: string;
@@ -74,19 +86,52 @@ export const OwnerDashboard: React.FC = () => {
   const { user, loading: authLoading } = useAuth();
   const { navigate } = useNavigation();
 
-  // Active Tab: 'entitas' | 'dokumen' | 'keuangan' | 'reward'
-  const [activeTab, setActiveTab] = useState<'entitas' | 'dokumen' | 'keuangan' | 'reward'>('entitas');
+  // Active Tab
+  const [activeTab, setActiveTab] = useState<
+    'overview' | 'perusahaan' | 'auditor' | 'laporan' | 'dokumen' | 'keuangan' | 'reward'
+  >('overview');
 
+  // Core Data States
   const [perusahaanList, setPerusahaanList] = useState<UserProfile[]>([]);
   const [auditorList, setAuditorList] = useState<UserProfile[]>([]);
+  const [reports, setReports] = useState<WhistleblowingReport[]>([]);
   const [transactions, setTransactions] = useState<AdminTransaction[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
 
-  // Top Up Modal State
-  const [selectedPTForTopUp, setSelectedPTForTopUp] = useState<UserProfile | null>(null);
-  const [topUpAmount, setTopUpAmount] = useState<number>(10000000);
-  const [topUpLoading, setTopUpLoading] = useState(false);
-  const [topUpSuccess, setTopUpSuccess] = useState(false);
+  // Filter States
+  const [docFilter, setDocFilter] = useState<'semua' | 'pending' | 'terverifikasi' | 'ditolak'>('semua');
+  const [txFilter, setTxFilter] = useState<'semua' | 'pending' | 'selesai' | 'ditolak'>('semua');
+
+  // Modal States
+  const [lockModalState, setLockModalState] = useState<{
+    isOpen: boolean;
+    entity: UserProfile | null;
+    action: 'lock' | 'unlock';
+  }>({ isOpen: false, entity: null, action: 'lock' });
+
+  const [editSaldoState, setEditSaldoState] = useState<{
+    isOpen: boolean;
+    entity: UserProfile | null;
+  }>({ isOpen: false, entity: null });
+
+  const [editAuditorSaldoState, setEditAuditorSaldoState] = useState<{
+    isOpen: boolean;
+    auditor: UserProfile | null;
+  }>({ isOpen: false, auditor: null });
+
+  const [editProfileState, setEditProfileState] = useState<{
+    isOpen: boolean;
+    entity: UserProfile | null;
+  }>({ isOpen: false, entity: null });
+
+  const [editReportState, setEditReportState] = useState<{
+    isOpen: boolean;
+    report: WhistleblowingReport | null;
+  }>({ isOpen: false, report: null });
+
+  const [deleteConfirmState, setDeleteConfirmState] = useState<{
+    isOpen: boolean;
+    target: { type: 'user' | 'report' | 'transaksi'; id: string; name: string } | null;
+  }>({ isOpen: false, target: null });
 
   // Poster Modal State
   const [selectedPTForPoster, setSelectedPTForPoster] = useState<PosterOptions | null>(null);
@@ -103,150 +148,183 @@ export const OwnerDashboard: React.FC = () => {
   const [rejectionReason, setRejectionReason] = useState('');
   const [processingAction, setProcessingAction] = useState(false);
 
-  // Filter states
-  const [docFilter, setDocFilter] = useState<'semua' | 'pending' | 'terverifikasi' | 'ditolak'>('semua');
-  const [txFilter, setTxFilter] = useState<'semua' | 'pending' | 'selesai' | 'ditolak'>('semua');
+  // Feedback Notification
+  const [toastFeedback, setToastFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-  // ProtectedRoute Check: only susidewiyuliyanti@gmail.com can access
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToastFeedback({ type, message });
+    setTimeout(() => setToastFeedback(null), 4000);
+  };
+
+  // ProtectedRoute Check: superadmin check
   useEffect(() => {
     if (!authLoading) {
       if (!user) {
         navigate('/login');
-      } else if (user.email?.toLowerCase() !== OWNER_EMAIL.toLowerCase()) {
+      } else if (!isOwnerEmail(user.email)) {
         navigate('/perusahaan');
       }
     }
   }, [user, authLoading, navigate]);
 
-  // Realtime subscription for Perusahaan & Auditor
+  // Realtime Subscriptions
   useEffect(() => {
-    if (!user || user.email?.toLowerCase() !== OWNER_EMAIL.toLowerCase()) return;
+    if (!user || !isOwnerEmail(user.email)) return;
 
-    // 1. Listen to Perusahaan
+    // 1. Perusahaan List
     const qPerusahaan = query(collection(db, 'users'), where('role', '==', 'perusahaan'));
-    const unsubPerusahaan = onSnapshot(
-      qPerusahaan,
-      (snapshot) => {
-        const list: UserProfile[] = [];
-        snapshot.forEach((docSnap) => {
-          const data = docSnap.data();
-          list.push({
-            uid: docSnap.id,
-            email: data.email || '',
-            role: 'perusahaan',
-            namaPT: data.namaPT || 'PT Tanpa Nama',
-            sektor: data.sektor || 'Umum',
-            alamat: data.alamat || '-',
-            deskripsi: data.deskripsi || '-',
-            danaTersedia: Number(data.danaTersedia || 0),
-            saldo: Number(data.saldo || 0),
-            createdAt: data.createdAt,
-            dokumenUrl: data.dokumenUrl,
-            dokumenNama: data.dokumenNama,
-            statusVerifikasiDokumen: data.statusVerifikasiDokumen || 'belum_upload',
-            catatanVerifikasi: data.catatanVerifikasi || '',
-            namaBank: data.namaBank,
-            nomorRekening: data.nomorRekening,
-            pemilikRekening: data.pemilikRekening
-          });
+    const unsubPerusahaan = onSnapshot(qPerusahaan, (snapshot) => {
+      const list: UserProfile[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data();
+        list.push({
+          uid: docSnap.id,
+          email: d.email || '',
+          role: 'perusahaan',
+          namaPT: d.namaPT || 'PT Tanpa Nama',
+          sektor: d.sektor || 'Umum',
+          alamat: d.alamat || '-',
+          deskripsi: d.deskripsi || '-',
+          telepon: d.telepon || '',
+          npwp: d.npwp || '',
+          picName: d.picName || '',
+          danaTersedia: Number(d.danaTersedia || 0),
+          saldo: Number(d.saldo || 0),
+          danaTerkunci: Number(d.danaTerkunci || 0),
+          isLocked: Boolean(d.isLocked || (Number(d.danaTerkunci || 0) > 0 && !d.danaTersedia)),
+          lockReason: d.lockReason || '',
+          statusVerifikasiDokumen: d.statusVerifikasiDokumen || 'belum_upload',
+          dokumenUrl: d.dokumenUrl,
+          dokumenNama: d.dokumenNama,
+          catatanVerifikasi: d.catatanVerifikasi || '',
+          namaBank: d.namaBank || d.rekeningBank?.bankName,
+          nomorRekening: d.nomorRekening || d.rekeningBank?.accountNumber,
+          pemilikRekening: d.pemilikRekening || d.rekeningBank?.holderName,
+          rekeningBank: d.rekeningBank,
+          createdAt: d.createdAt
         });
-        setPerusahaanList(list);
-      },
-      (error) => {
-        console.error('Error fetching perusahaan:', error);
-      }
-    );
+      });
+      setPerusahaanList(list);
+    });
 
-    // 2. Listen to Auditor
+    // 2. Auditor List
     const qAuditor = query(collection(db, 'users'), where('role', '==', 'auditor'));
-    const unsubAuditor = onSnapshot(
-      qAuditor,
-      (snapshot) => {
-        const list: UserProfile[] = [];
-        snapshot.forEach((docSnap) => {
-          const data = docSnap.data();
-          list.push({
-            uid: docSnap.id,
-            email: data.email || '',
-            role: 'auditor',
-            namaPT: data.namaPT || 'Auditor',
-            sektor: data.sektor || 'Audit',
-            alamat: data.alamat || '-',
-            deskripsi: data.deskripsi || '-',
-            danaTersedia: Number(data.danaTersedia || 0),
-            saldo: Number(data.saldo || 0),
-            createdAt: data.createdAt,
-            dokumenUrl: data.dokumenUrl,
-            dokumenNama: data.dokumenNama,
-            statusVerifikasiDokumen: data.statusVerifikasiDokumen || 'belum_upload',
-            catatanVerifikasi: data.catatanVerifikasi || '',
-            namaBank: data.namaBank,
-            nomorRekening: data.nomorRekening,
-            pemilikRekening: data.pemilikRekening
-          });
+    const unsubAuditor = onSnapshot(qAuditor, (snapshot) => {
+      const list: UserProfile[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data();
+        list.push({
+          uid: docSnap.id,
+          email: d.email || '',
+          role: 'auditor',
+          namaPT: d.namaPT || 'Auditor',
+          sektor: d.sektor || 'Investigator Independen',
+          alamat: d.alamat || '-',
+          deskripsi: d.deskripsi || '-',
+          telepon: d.telepon || '',
+          npwp: d.npwp || '',
+          picName: d.picName || '',
+          danaTersedia: Number(d.danaTersedia || 0),
+          saldo: Number(d.saldo || 0),
+          danaTerkunci: Number(d.danaTerkunci || 0),
+          isLocked: Boolean(d.isLocked),
+          lockReason: d.lockReason || '',
+          statusVerifikasiDokumen: d.statusVerifikasiDokumen || 'belum_upload',
+          dokumenUrl: d.dokumenUrl,
+          dokumenNama: d.dokumenNama,
+          catatanVerifikasi: d.catatanVerifikasi || '',
+          namaBank: d.namaBank || d.rekeningBank?.bankName,
+          nomorRekening: d.nomorRekening || d.rekeningBank?.accountNumber,
+          pemilikRekening: d.pemilikRekening || d.rekeningBank?.holderName,
+          rekeningBank: d.rekeningBank,
+          createdAt: d.createdAt
         });
-        setAuditorList(list);
-      },
-      (error) => {
-        console.error('Error fetching auditor:', error);
-      }
-    );
+      });
+      setAuditorList(list);
+    });
 
-    // 3. Listen to Transactions
+    // 3. Whistleblowing Reports
+    const qReports = collection(db, 'reports');
+    const unsubReports = onSnapshot(qReports, (snapshot) => {
+      const list: WhistleblowingReport[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data();
+        list.push({
+          id: docSnap.id,
+          companyId: d.companyId || '',
+          companyName: d.companyName || 'Perusahaan',
+          judul: d.judul || 'Laporan Dugaan Pelanggaran',
+          kategori: d.kategori || 'Umum',
+          tipePelanggaran: d.tipePelanggaran || 'finansial',
+          estimasiKerugian: Number(d.estimasiKerugian || 0),
+          deskripsi: d.deskripsi || '',
+          tanggalKejadian: d.tanggalKejadian || '',
+          lokasi: d.lokasi || '',
+          status: d.status || 'baru',
+          tokenAkses: d.tokenAkses || '',
+          pelaporAnonim: Boolean(d.pelaporAnonim),
+          targetAuditorId: d.targetAuditorId || d.auditorId,
+          targetAuditorName: d.targetAuditorName || d.auditorName,
+          catatanAuditor: d.catatanAuditor || '',
+          rewardAmount: Number(d.rewardAmount || 0),
+          rewardMinAmount: Number(d.rewardMinAmount || 0),
+          rewardClaimStatus: d.rewardClaimStatus || 'none',
+          rewardClaimed: Boolean(d.rewardClaimed),
+          whatsappPelapor: d.whatsappPelapor || '',
+          buktiFiles: d.buktiFiles || [],
+          createdAt: d.createdAt
+        });
+      });
+      // Newest first
+      list.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+      setReports(list);
+    });
+
+    // 4. Financial Transactions
     const qTx = collection(db, 'transactions');
-    const unsubTx = onSnapshot(
-      qTx,
-      (snapshot) => {
-        const list: AdminTransaction[] = [];
-        snapshot.forEach((docSnap) => {
-          const d = docSnap.data();
-          list.push({
-            id: docSnap.id,
-            userId: d.userId,
-            type: d.type,
-            amount: Number(d.amount || 0),
-            status: d.status || 'pending',
-            keterangan: d.keterangan || '',
-            method: d.method,
-            bankName: d.bankName || d.bankDetails?.bankName,
-            accountNumber: d.accountNumber || d.bankDetails?.accountNumber,
-            holderName: d.holderName || d.bankDetails?.holderName,
-            bankDetails: d.bankDetails,
-            claimReportToken: d.claimReportToken,
-            claimReportId: d.claimReportId,
-            companyName: d.companyName,
-            whatsapp: d.whatsapp,
-            userEmail: d.userEmail,
-            catatanAdmin: d.catatanAdmin,
-            createdAt: d.createdAt
-          });
+    const unsubTx = onSnapshot(qTx, (snapshot) => {
+      const list: AdminTransaction[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data();
+        list.push({
+          id: docSnap.id,
+          userId: d.userId,
+          type: d.type,
+          amount: Number(d.amount || 0),
+          status: d.status || 'pending',
+          keterangan: d.keterangan || '',
+          method: d.method || d.metode,
+          bankName: d.bankName || d.bankDetails?.bankName,
+          accountNumber: d.accountNumber || d.bankDetails?.accountNumber,
+          holderName: d.holderName || d.bankDetails?.holderName,
+          bankDetails: d.bankDetails,
+          claimReportToken: d.claimReportToken,
+          claimReportId: d.claimReportId,
+          companyName: d.companyName,
+          whatsapp: d.whatsapp,
+          userEmail: d.userEmail,
+          catatanAdmin: d.catatanAdmin,
+          createdAt: d.createdAt
         });
-        // Sort newest first
-        list.sort((a, b) => {
-          const timeA = a.createdAt?.seconds || 0;
-          const timeB = b.createdAt?.seconds || 0;
-          return timeB - timeA;
-        });
-        setTransactions(list);
-      },
-      (error) => {
-        console.error('Error fetching transactions:', error);
-      }
-    );
+      });
+      list.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+      setTransactions(list);
+    });
 
     return () => {
       unsubPerusahaan();
       unsubAuditor();
+      unsubReports();
       unsubTx();
     };
   }, [user]);
 
-  // Combined entity list for Document verification
+  // Combined documents for verification
   const allEntitiesWithDocs = [...perusahaanList, ...auditorList].filter(
     (e) => e.dokumenUrl || (e.statusVerifikasiDokumen && e.statusVerifikasiDokumen !== 'belum_upload')
   );
 
-  // Pending counts
+  // Pending Badges
   const pendingDocsCount = allEntitiesWithDocs.filter((e) => e.statusVerifikasiDokumen === 'pending').length;
   const pendingFinanceTxCount = transactions.filter(
     (t) => (t.type === 'deposit' || t.type === 'withdrawal') && t.status === 'pending'
@@ -255,51 +333,200 @@ export const OwnerDashboard: React.FC = () => {
     (t) => t.type === 'claim_reward' && t.status === 'pending'
   ).length;
 
-  // Filtered companies
-  const filteredPerusahaan = perusahaanList.filter(
-    (pt) =>
-      pt.namaPT.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      pt.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      pt.sektor.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  // Top Up Handler using increment()
-  const handleTopUpSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedPTForTopUp || topUpAmount <= 0) return;
-
+  // ==========================================
+  // HANDLERS: LOCK / UNLOCK SALDO PERUSAHAAN
+  // ==========================================
+  const handleLockConfirm = async (
+    entityId: string,
+    action: 'lock' | 'unlock',
+    amount: number,
+    reason: string
+  ) => {
     try {
-      setTopUpLoading(true);
-      const userRef = doc(db, 'users', selectedPTForTopUp.uid);
+      const userRef = doc(db, 'users', entityId);
 
-      await updateDoc(userRef, {
-        danaTersedia: increment(topUpAmount),
-        saldo: increment(topUpAmount)
-      });
+      if (action === 'lock') {
+        // Lock: mark isLocked = true, lockReason, move amount to danaTerkunci
+        await updateDoc(userRef, {
+          isLocked: true,
+          lockReason: reason,
+          danaTersedia: increment(-amount),
+          danaTerkunci: increment(amount)
+        });
 
-      setTopUpSuccess(true);
-      setTimeout(() => {
-        setTopUpSuccess(false);
-        setSelectedPTForTopUp(null);
-      }, 1500);
-    } catch (err) {
-      console.error('Error updating dana via increment:', err);
-    } finally {
-      setTopUpLoading(false);
+        await addDoc(collection(db, 'transactions'), {
+          userId: entityId,
+          type: 'lock',
+          amount,
+          status: 'selesai',
+          keterangan: `Penguncian saldo oleh Administrator: ${reason}`,
+          catatanAdmin: reason,
+          processedBy: user?.email || OWNER_EMAIL,
+          createdAt: serverTimestamp()
+        });
+
+        showToast(`Saldo berhasil dikunci (LOCKED). Status entitas diperbarui.`);
+      } else {
+        // Unlock: mark isLocked = false, clear lockReason, return amount to danaTersedia
+        await updateDoc(userRef, {
+          isLocked: false,
+          lockReason: '',
+          danaTerkunci: increment(-amount),
+          danaTersedia: increment(amount)
+        });
+
+        await addDoc(collection(db, 'transactions'), {
+          userId: entityId,
+          type: 'unlock',
+          amount,
+          status: 'selesai',
+          keterangan: `Pembukaan kunci saldo oleh Administrator: ${reason}`,
+          catatanAdmin: reason,
+          processedBy: user?.email || OWNER_EMAIL,
+          createdAt: serverTimestamp()
+        });
+
+        showToast(`Saldo berhasil dibuka (UNLOCKED). Perusahaan dapat kembali bertransaksi.`);
+      }
+    } catch (err: any) {
+      console.error('Error locking/unlocking saldo:', err);
+      showToast('Gagal memproses lock/unlock: ' + err.message, 'error');
     }
   };
 
-  const openPosterModal = (pt: UserProfile) => {
-    setSelectedPTForPoster({
-      uid: pt.uid,
-      namaPT: pt.namaPT,
-      danaTersedia: pt.danaTersedia,
-      sektor: pt.sektor
-    });
-    setIsPosterModalOpen(true);
+  // ==========================================
+  // HANDLERS: EDIT SALDO & TOP UP PERUSAHAAN
+  // ==========================================
+  const handleSaveCompanySaldo = async (
+    entityId: string,
+    danaTersedia: number,
+    saldo: number,
+    danaTerkunci: number
+  ) => {
+    try {
+      const userRef = doc(db, 'users', entityId);
+      await updateDoc(userRef, {
+        danaTersedia,
+        saldo,
+        danaTerkunci,
+        isLocked: danaTerkunci > 0 && danaTersedia === 0
+      });
+      showToast('Nilai saldo perusahaan berhasil diperbarui!');
+    } catch (err: any) {
+      showToast('Gagal mengubah saldo: ' + err.message, 'error');
+    }
   };
 
-  // 1. APPROVE DOCUMENT
+  const handleTopUpCompany = async (entityId: string, amount: number) => {
+    try {
+      const userRef = doc(db, 'users', entityId);
+      await updateDoc(userRef, {
+        danaTersedia: increment(amount),
+        saldo: increment(amount)
+      });
+      await addDoc(collection(db, 'transactions'), {
+        userId: entityId,
+        type: 'deposit',
+        amount,
+        status: 'selesai',
+        keterangan: 'Top up dana kepatuhan langsung oleh Administrator Integritas360',
+        processedBy: user?.email || OWNER_EMAIL,
+        createdAt: serverTimestamp()
+      });
+      showToast(`Berhasil menambah dana sebesar Rp ${amount.toLocaleString('id-ID')}!`);
+    } catch (err: any) {
+      showToast('Gagal menambah dana: ' + err.message, 'error');
+    }
+  };
+
+  // ==========================================
+  // HANDLERS: EDIT SALDO AUDITOR
+  // ==========================================
+  const handleSaveAuditorSaldo = async (auditorId: string, saldoBaru: number) => {
+    try {
+      const userRef = doc(db, 'users', auditorId);
+      await updateDoc(userRef, {
+        saldo: saldoBaru
+      });
+      showToast('Saldo honorarium auditor berhasil diperbarui!');
+    } catch (err: any) {
+      showToast('Gagal mengubah saldo auditor: ' + err.message, 'error');
+    }
+  };
+
+  const handleTopUpAuditorFee = async (auditorId: string, feeAmount: number) => {
+    try {
+      const userRef = doc(db, 'users', auditorId);
+      await updateDoc(userRef, {
+        saldo: increment(feeAmount)
+      });
+      await addDoc(collection(db, 'transactions'), {
+        userId: auditorId,
+        type: 'deposit',
+        amount: feeAmount,
+        status: 'selesai',
+        keterangan: 'Pemberian fee / honorarium investigasi audit oleh Administrator',
+        processedBy: user?.email || OWNER_EMAIL,
+        createdAt: serverTimestamp()
+      });
+      showToast(`Honorarium auditor berhasil ditambahkan sebesar Rp ${feeAmount.toLocaleString('id-ID')}!`);
+    } catch (err: any) {
+      showToast('Gagal menambah honorarium auditor: ' + err.message, 'error');
+    }
+  };
+
+  // ==========================================
+  // HANDLERS: EDIT PROFILE (PT / AUDITOR)
+  // ==========================================
+  const handleSaveProfile = async (entityId: string, updatedData: Partial<UserProfile>) => {
+    try {
+      const userRef = doc(db, 'users', entityId);
+      await updateDoc(userRef, updatedData);
+      showToast('Data entitas berhasil diperbarui!');
+    } catch (err: any) {
+      showToast('Gagal menyimpan data entitas: ' + err.message, 'error');
+    }
+  };
+
+  // ==========================================
+  // HANDLERS: EDIT REPORT
+  // ==========================================
+  const handleSaveReport = async (reportId: string, updatedData: Partial<WhistleblowingReport>) => {
+    try {
+      const reportRef = doc(db, 'reports', reportId);
+      await updateDoc(reportRef, updatedData);
+      showToast('Data berkas laporan whistleblowing berhasil diperbarui!');
+    } catch (err: any) {
+      showToast('Gagal memperbarui laporan: ' + err.message, 'error');
+    }
+  };
+
+  // ==========================================
+  // HANDLERS: DELETE ITEMS
+  // ==========================================
+  const handleDeleteConfirm = async () => {
+    if (!deleteConfirmState.target) return;
+    const { type, id } = deleteConfirmState.target;
+
+    try {
+      if (type === 'user') {
+        await deleteDoc(doc(db, 'users', id));
+        showToast('Data pengguna / entitas berhasil dihapus secara permanen.');
+      } else if (type === 'report') {
+        await deleteDoc(doc(db, 'reports', id));
+        showToast('Data laporan whistleblowing berhasil dihapus.');
+      } else if (type === 'transaksi') {
+        await deleteDoc(doc(db, 'transactions', id));
+        showToast('Data mutasi transaksi berhasil dihapus.');
+      }
+    } catch (err: any) {
+      showToast('Gagal menghapus data: ' + err.message, 'error');
+    }
+  };
+
+  // ==========================================
+  // HANDLERS: APPROVE & REJECT TRANSAKSI / DOCS
+  // ==========================================
   const handleApproveDocument = async (entity: UserProfile) => {
     try {
       setProcessingAction(true);
@@ -308,21 +535,20 @@ export const OwnerDashboard: React.FC = () => {
         statusVerifikasiDokumen: 'terverifikasi',
         catatanVerifikasi: 'Dokumen legalitas telah diverifikasi dan disetujui oleh Administrator INTEGRITAS360.'
       });
-    } catch (err) {
-      console.error('Error approving document:', err);
+      showToast('Dokumen legalitas berhasil disetujui!');
+    } catch (err: any) {
+      showToast('Gagal menyetujui dokumen: ' + err.message, 'error');
     } finally {
       setProcessingAction(false);
     }
   };
 
-  // 2. APPROVE TRANSACTION (DEPOSIT / WITHDRAWAL)
   const handleApproveTransaction = async (tx: AdminTransaction) => {
     try {
       setProcessingAction(true);
       const txRef = doc(db, 'transactions', tx.id);
 
       if (tx.type === 'deposit') {
-        // Approve deposit -> update tx status & increment user saldo & danaTersedia
         await updateDoc(txRef, {
           status: 'selesai',
           processedAt: serverTimestamp(),
@@ -336,22 +562,22 @@ export const OwnerDashboard: React.FC = () => {
             danaTersedia: increment(tx.amount)
           });
         }
+        showToast('Deposit saldo berhasil disetujui & ditambahkan ke akun!');
       } else if (tx.type === 'withdrawal') {
-        // Approve withdrawal -> money already deducted on user side, just mark finished
         await updateDoc(txRef, {
           status: 'selesai',
           processedAt: serverTimestamp(),
           processedBy: user?.email || OWNER_EMAIL
         });
+        showToast('Penarikan dana telah disetujui & ditransfer!');
       }
-    } catch (err) {
-      console.error('Error approving transaction:', err);
+    } catch (err: any) {
+      showToast('Gagal memproses transaksi: ' + err.message, 'error');
     } finally {
       setProcessingAction(false);
     }
   };
 
-  // 3. APPROVE CLAIM REWARD
   const handleApproveClaimReward = async (tx: AdminTransaction) => {
     try {
       setProcessingAction(true);
@@ -363,7 +589,6 @@ export const OwnerDashboard: React.FC = () => {
         processedBy: user?.email || OWNER_EMAIL
       });
 
-      // Update report doc if report ID or token is linked
       if (tx.claimReportId) {
         const reportRef = doc(db, 'reports', tx.claimReportId);
         await updateDoc(reportRef, {
@@ -371,14 +596,14 @@ export const OwnerDashboard: React.FC = () => {
           rewardClaimed: true
         });
       }
-    } catch (err) {
-      console.error('Error approving reward claim:', err);
+      showToast('Pencairan klaim reward pelapor berhasil diselesaikan!');
+    } catch (err: any) {
+      showToast('Gagal menyelesaikan klaim reward: ' + err.message, 'error');
     } finally {
       setProcessingAction(false);
     }
   };
 
-  // 4. SUBMIT REJECTION
   const handleRejectionSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!rejectionTarget || !rejectionReason.trim()) return;
@@ -392,6 +617,7 @@ export const OwnerDashboard: React.FC = () => {
           statusVerifikasiDokumen: 'ditolak',
           catatanVerifikasi: rejectionReason.trim()
         });
+        showToast('Dokumen ditolak dengan catatan.');
       } else if (rejectionTarget.type === 'transaksi') {
         const txRef = doc(db, 'transactions', rejectionTarget.id);
         await updateDoc(txRef, {
@@ -401,13 +627,14 @@ export const OwnerDashboard: React.FC = () => {
           processedBy: user?.email || OWNER_EMAIL
         });
 
-        // If it was a withdrawal that got rejected, refund user's balance
+        // Refund withdrawal balance
         if (rejectionTarget.subId === 'withdrawal' && rejectionTarget.userId && rejectionTarget.nominal) {
           const userRef = doc(db, 'users', rejectionTarget.userId);
           await updateDoc(userRef, {
             saldo: increment(rejectionTarget.nominal)
           });
         }
+        showToast('Transaksi ditolak.');
       } else if (rejectionTarget.type === 'reward') {
         const txRef = doc(db, 'transactions', rejectionTarget.id);
         await updateDoc(txRef, {
@@ -423,33 +650,43 @@ export const OwnerDashboard: React.FC = () => {
             rewardClaimStatus: 'ditolak'
           });
         }
+        showToast('Klaim reward ditolak.');
       }
 
       setRejectionTarget(null);
       setRejectionReason('');
-    } catch (err) {
-      console.error('Error rejecting:', err);
+    } catch (err: any) {
+      showToast('Gagal menolak: ' + err.message, 'error');
     } finally {
       setProcessingAction(false);
     }
+  };
+
+  const openPosterModal = (pt: UserProfile) => {
+    setSelectedPTForPoster({
+      uid: pt.uid,
+      namaPT: pt.namaPT,
+      danaTersedia: pt.danaTersedia,
+      sektor: pt.sektor
+    });
+    setIsPosterModalOpen(true);
   };
 
   if (authLoading) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400">
         <RefreshCw className="w-6 h-6 animate-spin text-amber-400 mr-2" />
-        Memeriksa Otoritas Administrator...
+        Memeriksa Otoritas Administrator Pusat...
       </div>
     );
   }
 
-  // Filtered Document entities
+  // Filtered lists for sub-tabs
   const filteredDocEntities = allEntitiesWithDocs.filter((e) => {
     if (docFilter === 'semua') return true;
     return e.statusVerifikasiDokumen === docFilter;
   });
 
-  // Filtered Financial transactions
   const filteredFinanceTx = transactions
     .filter((t) => t.type === 'deposit' || t.type === 'withdrawal')
     .filter((t) => {
@@ -457,50 +694,124 @@ export const OwnerDashboard: React.FC = () => {
       return t.status === txFilter;
     });
 
-  // Reward claim transactions
   const rewardClaimTx = transactions.filter((t) => t.type === 'claim_reward');
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 py-8 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-7xl mx-auto space-y-8">
-        {/* Header Title */}
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-6 border-b border-slate-800">
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* TOAST FEEDBACK NOTIFICATION */}
+        {toastFeedback && (
+          <div
+            className={`fixed top-5 right-5 z-50 px-4 py-3 rounded-2xl shadow-2xl border text-xs font-bold flex items-center gap-2 transition-all ${
+              toastFeedback.type === 'success'
+                ? 'bg-emerald-950/90 border-emerald-500/50 text-emerald-300'
+                : 'bg-red-950/90 border-red-500/50 text-red-300'
+            }`}
+          >
+            {toastFeedback.type === 'success' ? (
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-red-400" />
+            )}
+            <span>{toastFeedback.message}</span>
+          </div>
+        )}
+
+        {/* HEADER BAR */}
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-4 border-b border-slate-800">
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-bold mb-2">
               <ShieldAlert className="w-3.5 h-3.5" />
               PANEL ADMINISTRATOR PUSAT
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-white">
-              Pusat Kendali & Verifikasi Integritas360
+              Pusat Kendali Ekosistem & Manajemen Data Integritas360
             </h1>
             <p className="text-xs sm:text-sm text-slate-400">
               Administrator Resmi:{' '}
-              <span className="font-mono text-red-300 font-bold">{OWNER_EMAIL}</span>
+              <span className="font-mono text-red-300 font-bold">{user?.email || OWNER_EMAIL}</span>
             </p>
           </div>
 
           <div className="flex items-center gap-3">
             <div className="px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300 flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-              Database Realtime Verifikasi Aktif
+              Otoritas Kelola Penuh Aktif
             </div>
           </div>
         </div>
 
-        {/* NAVIGATION TABS WITH PENDING BADGES */}
-        <div className="flex flex-wrap gap-2 border-b border-slate-800 pb-3">
+        {/* ALWAYS VISIBLE SUMMARY: SEMUA SALDO (Card Overview) */}
+        <AdminBalanceOverview
+          perusahaanList={perusahaanList}
+          auditorList={auditorList}
+          totalReportsCount={reports.length}
+        />
+
+        {/* MASTER NAVIGATION TABS */}
+        <div className="flex flex-wrap gap-2 border-b border-slate-800 pb-3 pt-2">
+          {/* TAB 1: OVERVIEW */}
           <button
-            onClick={() => setActiveTab('entitas')}
+            onClick={() => setActiveTab('overview')}
             className={`px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'entitas'
+              activeTab === 'overview'
+                ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20'
+                : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
+            }`}
+          >
+            <Coins className="w-4 h-4" />
+            <span>Ringkasan Saldo</span>
+          </button>
+
+          {/* TAB 2: PERUSAHAAN (LOCK/TERBUKA) */}
+          <button
+            onClick={() => setActiveTab('perusahaan')}
+            className={`px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition-all cursor-pointer ${
+              activeTab === 'perusahaan'
                 ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20'
                 : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
             }`}
           >
             <Building2 className="w-4 h-4" />
-            <span>Ringkasan & Entitas</span>
+            <span>Kelola Saldo Perusahaan</span>
+            <span className="px-1.5 py-0.5 rounded-full bg-slate-800 text-amber-300 font-mono text-[10px] font-bold">
+              {perusahaanList.length}
+            </span>
           </button>
 
+          {/* TAB 3: AUDITOR */}
+          <button
+            onClick={() => setActiveTab('auditor')}
+            className={`px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition-all cursor-pointer ${
+              activeTab === 'auditor'
+                ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20'
+                : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
+            }`}
+          >
+            <Eye className="w-4 h-4" />
+            <span>Kelola Saldo Auditor</span>
+            <span className="px-1.5 py-0.5 rounded-full bg-slate-800 text-blue-300 font-mono text-[10px] font-bold">
+              {auditorList.length}
+            </span>
+          </button>
+
+          {/* TAB 4: LAPORAN (CRUD) */}
+          <button
+            onClick={() => setActiveTab('laporan')}
+            className={`px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition-all cursor-pointer ${
+              activeTab === 'laporan'
+                ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20'
+                : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            <span>Kelola Semua Laporan</span>
+            <span className="px-1.5 py-0.5 rounded-full bg-slate-800 text-amber-300 font-mono text-[10px] font-bold">
+              {reports.length}
+            </span>
+          </button>
+
+          {/* TAB 5: DOKUMEN */}
           <button
             onClick={() => setActiveTab('dokumen')}
             className={`px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition-all cursor-pointer relative ${
@@ -510,7 +821,7 @@ export const OwnerDashboard: React.FC = () => {
             }`}
           >
             <FileCheck className="w-4 h-4" />
-            <span>Verifikasi Dokumen Legalitas</span>
+            <span>Verifikasi Dokumen</span>
             {pendingDocsCount > 0 && (
               <span className="px-1.5 py-0.5 rounded-full bg-red-500 text-white font-mono text-[10px] font-bold">
                 {pendingDocsCount}
@@ -518,6 +829,7 @@ export const OwnerDashboard: React.FC = () => {
             )}
           </button>
 
+          {/* TAB 6: KEUANGAN */}
           <button
             onClick={() => setActiveTab('keuangan')}
             className={`px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition-all cursor-pointer relative ${
@@ -535,6 +847,7 @@ export const OwnerDashboard: React.FC = () => {
             )}
           </button>
 
+          {/* TAB 7: REWARD */}
           <button
             onClick={() => setActiveTab('reward')}
             className={`px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition-all cursor-pointer relative ${
@@ -553,233 +866,106 @@ export const OwnerDashboard: React.FC = () => {
           </button>
         </div>
 
-        {/* TAB 1: RINGKASAN & ENTITAS */}
-        {activeTab === 'entitas' && (
-          <div className="space-y-8">
-            {/* STATISTIK: Total Perusahaan, Total Auditor, Total Dana */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-              {/* Total Perusahaan */}
-              <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 relative overflow-hidden shadow-lg">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">
-                      Total Perusahaan
-                    </p>
-                    <h3 className="text-3xl font-extrabold text-white mt-1.5 font-mono">
-                      {perusahaanList.length}
-                    </h3>
-                  </div>
-                  <div className="w-12 h-12 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
-                    <Building2 className="w-6 h-6" />
-                  </div>
-                </div>
-                <div className="mt-4 flex items-center text-xs text-slate-400">
-                  <span className="text-blue-400 font-medium mr-1.5">PT Terdaftar</span>
-                  di sistem pengawasan whistleblowing
-                </div>
-              </div>
+        {/* TAB CONTENT: 1. OVERVIEW */}
+        {activeTab === 'overview' && (
+          <div className="space-y-6">
+            <AdminPerusahaanTable
+              perusahaanList={perusahaanList}
+              onOpenLockModal={(pt, action) =>
+                setLockModalState({ isOpen: true, entity: pt, action })
+              }
+              onOpenEditSaldoModal={(pt) =>
+                setEditSaldoState({ isOpen: true, entity: pt })
+              }
+              onOpenEditProfileModal={(pt) =>
+                setEditProfileState({ isOpen: true, entity: pt })
+              }
+              onOpenPosterModal={openPosterModal}
+              onDeleteUser={(pt) =>
+                setDeleteConfirmState({
+                  isOpen: true,
+                  target: { type: 'user', id: pt.uid, name: pt.namaPT }
+                })
+              }
+            />
 
-              {/* Total Auditor */}
-              <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 relative overflow-hidden shadow-lg">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">
-                      Total Auditor
-                    </p>
-                    <h3 className="text-3xl font-extrabold text-white mt-1.5 font-mono">
-                      {auditorList.length}
-                    </h3>
-                  </div>
-                  <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                    <Eye className="w-6 h-6" />
-                  </div>
-                </div>
-                <div className="mt-4 flex items-center text-xs text-slate-400">
-                  <span className="text-emerald-400 font-medium mr-1.5">Pihak Independen</span>
-                  siap melakukan telaah dan validasi
-                </div>
-              </div>
-
-              {/* Total Dana */}
-              <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 relative overflow-hidden shadow-lg">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">
-                      Total Dana Kepatuhan
-                    </p>
-                    <h3 className="text-2xl sm:text-3xl font-extrabold text-emerald-400 mt-1.5 font-mono">
-                      Rp {perusahaanList.reduce((acc, curr) => acc + (curr.danaTersedia || 0), 0).toLocaleString('id-ID')}
-                    </h3>
-                  </div>
-                  <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                    <Wallet className="w-6 h-6" />
-                  </div>
-                </div>
-                <div className="mt-4 flex items-center text-xs text-slate-400">
-                  <span className="text-emerald-400 font-medium mr-1.5">Akumulasi Saldo</span>
-                  seluruh entitas perusahaan aktif
-                </div>
-              </div>
-            </div>
-
-            {/* TABEL DAFTAR PERUSAHAAN */}
-            <div className="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-              <div className="p-5 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-slate-950/40">
-                <div>
-                  <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                    <Building2 className="w-5 h-5 text-amber-400" />
-                    Daftar Perusahaan (PT) Terdaftar
-                  </h2>
-                  <p className="text-xs text-slate-400">
-                    Sinkronisasi realtime Firestore ({perusahaanList.length} entitas aktif)
-                  </p>
-                </div>
-
-                {/* Search */}
-                <div className="relative max-w-xs w-full">
-                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="text"
-                    placeholder="Cari nama PT, email, sektor..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-              </div>
-
-              {filteredPerusahaan.length === 0 ? (
-                <div className="py-16 text-center text-slate-500 space-y-3">
-                  <Building2 className="w-12 h-12 mx-auto text-slate-700" />
-                  <p className="text-sm font-medium">Belum ada perusahaan yang terdaftar.</p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-950/80 text-slate-400 uppercase font-semibold border-b border-slate-800">
-                      <tr>
-                        <th className="px-5 py-3.5">Nama Perusahaan</th>
-                        <th className="px-5 py-3.5">Sektor Industri</th>
-                        <th className="px-5 py-3.5">Status Dokumen</th>
-                        <th className="px-5 py-3.5">Dana Tersedia</th>
-                        <th className="px-5 py-3.5 text-right">Aksi Kelola</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800/60">
-                      {filteredPerusahaan.map((pt) => (
-                        <tr key={pt.uid} className="hover:bg-slate-800/40 transition-colors">
-                          <td className="px-5 py-4">
-                            <div className="font-bold text-white text-sm">{pt.namaPT}</div>
-                            <div className="text-[11px] text-slate-400 truncate max-w-xs">{pt.email}</div>
-                          </td>
-                          <td className="px-5 py-4">
-                            <span className="inline-block px-2.5 py-1 rounded-md bg-slate-800 text-slate-300 font-medium text-[11px]">
-                              {pt.sektor}
-                            </span>
-                          </td>
-                          <td className="px-5 py-4">
-                            <span
-                              className={`text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full border ${
-                                pt.statusVerifikasiDokumen === 'terverifikasi'
-                                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                                  : pt.statusVerifikasiDokumen === 'pending'
-                                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                                  : pt.statusVerifikasiDokumen === 'ditolak'
-                                  ? 'bg-red-500/10 text-red-400 border-red-500/30'
-                                  : 'bg-slate-800 text-slate-400 border-slate-700'
-                              }`}
-                            >
-                              {pt.statusVerifikasiDokumen === 'terverifikasi'
-                                ? 'Terverifikasi'
-                                : pt.statusVerifikasiDokumen === 'pending'
-                                ? 'Menunggu Review'
-                                : pt.statusVerifikasiDokumen === 'ditolak'
-                                ? 'Ditolak'
-                                : 'Belum Unggah'}
-                            </span>
-                          </td>
-                          <td className="px-5 py-4">
-                            <span className="font-mono font-bold text-emerald-400 text-sm bg-emerald-950/40 border border-emerald-800/40 px-2.5 py-1 rounded-lg inline-block">
-                              Rp {Number(pt.danaTersedia || 0).toLocaleString('id-ID')}
-                            </span>
-                          </td>
-                          <td className="px-5 py-4 text-right space-x-2 whitespace-nowrap">
-                            <button
-                              id={`btn-tambah-dana-${pt.uid}`}
-                              onClick={() => {
-                                setSelectedPTForTopUp(pt);
-                                setTopUpAmount(10000000);
-                              }}
-                              className="px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-                            >
-                              <PlusCircle className="w-3.5 h-3.5" />
-                              Tambah Dana
-                            </button>
-
-                            <button
-                              id={`btn-download-poster-${pt.uid}`}
-                              onClick={() => openPosterModal(pt)}
-                              className="px-3 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-                            >
-                              <Download className="w-3.5 h-3.5" />
-                              Poster QR
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-
-            {/* AUDITOR LIST SECTION */}
-            <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-base font-bold text-white flex items-center gap-2">
-                    <Eye className="w-5 h-5 text-emerald-400" />
-                    Auditor & Investigator Independen ({auditorList.length})
-                  </h2>
-                  <p className="text-xs text-slate-400">Daftar auditor independen yang berwenang menelaah laporan</p>
-                </div>
-              </div>
-
-              {auditorList.length === 0 ? (
-                <p className="text-xs text-slate-500 italic">Belum ada auditor terdaftar.</p>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-2">
-                  {auditorList.map((auditor) => (
-                    <div key={auditor.uid} className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-bold text-white">{auditor.namaPT}</span>
-                        <span
-                          className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${
-                            auditor.statusVerifikasiDokumen === 'terverifikasi'
-                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                              : auditor.statusVerifikasiDokumen === 'pending'
-                              ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-                              : 'bg-slate-800 text-slate-400 border-slate-700'
-                          }`}
-                        >
-                          {auditor.statusVerifikasiDokumen === 'terverifikasi'
-                            ? 'Terverifikasi'
-                            : auditor.statusVerifikasiDokumen === 'pending'
-                            ? 'Menunggu Review'
-                            : 'Belum Upload'}
-                        </span>
-                      </div>
-                      <p className="text-xs font-mono text-slate-400">{auditor.email}</p>
-                      <div className="text-[11px] text-slate-500">Spesialisasi: {auditor.sektor}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <AdminAuditorTable
+              auditorList={auditorList}
+              onOpenEditSaldoAuditor={(auditor) =>
+                setEditAuditorSaldoState({ isOpen: true, auditor })
+              }
+              onOpenEditProfileModal={(auditor) =>
+                setEditProfileState({ isOpen: true, entity: auditor })
+              }
+              onDeleteAuditor={(auditor) =>
+                setDeleteConfirmState({
+                  isOpen: true,
+                  target: { type: 'user', id: auditor.uid, name: auditor.namaPT }
+                })
+              }
+            />
           </div>
         )}
 
-        {/* TAB 2: VERIFIKASI DOKUMEN LEGALITAS */}
+        {/* TAB CONTENT: 2. PERUSAHAAN (LOCK / TERBUKA) */}
+        {activeTab === 'perusahaan' && (
+          <AdminPerusahaanTable
+            perusahaanList={perusahaanList}
+            onOpenLockModal={(pt, action) =>
+              setLockModalState({ isOpen: true, entity: pt, action })
+            }
+            onOpenEditSaldoModal={(pt) =>
+              setEditSaldoState({ isOpen: true, entity: pt })
+            }
+            onOpenEditProfileModal={(pt) =>
+              setEditProfileState({ isOpen: true, entity: pt })
+            }
+            onOpenPosterModal={openPosterModal}
+            onDeleteUser={(pt) =>
+              setDeleteConfirmState({
+                isOpen: true,
+                target: { type: 'user', id: pt.uid, name: pt.namaPT }
+              })
+            }
+          />
+        )}
+
+        {/* TAB CONTENT: 3. AUDITOR */}
+        {activeTab === 'auditor' && (
+          <AdminAuditorTable
+            auditorList={auditorList}
+            onOpenEditSaldoAuditor={(auditor) =>
+              setEditAuditorSaldoState({ isOpen: true, auditor })
+            }
+            onOpenEditProfileModal={(auditor) =>
+              setEditProfileState({ isOpen: true, entity: auditor })
+            }
+            onDeleteAuditor={(auditor) =>
+              setDeleteConfirmState({
+                isOpen: true,
+                target: { type: 'user', id: auditor.uid, name: auditor.namaPT }
+              })
+            }
+          />
+        )}
+
+        {/* TAB CONTENT: 4. LAPORAN (CRUD) */}
+        {activeTab === 'laporan' && (
+          <AdminReportsManager
+            reports={reports}
+            onOpenEditReportModal={(report) =>
+              setEditReportState({ isOpen: true, report })
+            }
+            onDeleteReport={(report) =>
+              setDeleteConfirmState({
+                isOpen: true,
+                target: { type: 'report', id: report.id!, name: `Laporan #${report.tokenAkses} (${report.judul})` }
+              })
+            }
+          />
+        )}
+
+        {/* TAB CONTENT: 5. DOKUMEN LEGALITAS */}
         {activeTab === 'dokumen' && (
           <div className="space-y-6">
             <div className="p-4 bg-amber-500/10 rounded-2xl border border-amber-500/30 flex items-start gap-3">
@@ -855,7 +1041,6 @@ export const OwnerDashboard: React.FC = () => {
                       </span>
                     </div>
 
-                    {/* Document detail preview */}
                     <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between text-xs">
                       <div className="flex items-center gap-2 truncate pr-2">
                         <FileText className="w-4 h-4 text-amber-400 shrink-0" />
@@ -886,7 +1071,6 @@ export const OwnerDashboard: React.FC = () => {
                       </div>
                     )}
 
-                    {/* Actions */}
                     <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
                       {entitas.statusVerifikasiDokumen !== 'ditolak' && (
                         <button
@@ -923,7 +1107,7 @@ export const OwnerDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* TAB 3: VERIFIKASI DEPOSIT & PENARIKAN */}
+        {/* TAB CONTENT: 6. VERIFIKASI DEPOSIT & PENARIKAN */}
         {activeTab === 'keuangan' && (
           <div className="space-y-6">
             <div className="p-4 bg-emerald-500/10 rounded-2xl border border-emerald-500/30 flex items-start gap-3">
@@ -1010,7 +1194,6 @@ export const OwnerDashboard: React.FC = () => {
                         {tx.keterangan || (tx.type === 'deposit' ? 'Permintaan Deposit' : 'Permintaan Penarikan Dana')}
                       </div>
 
-                      {/* Bank / Method Info */}
                       <div className="text-xs text-slate-400 flex flex-wrap gap-x-4 gap-y-1">
                         {tx.method && <span>Metode: <strong className="text-slate-200">{tx.method}</strong></span>}
                         {tx.bankName && <span>Bank: <strong className="text-slate-200">{tx.bankName}</strong></span>}
@@ -1042,35 +1225,50 @@ export const OwnerDashboard: React.FC = () => {
                         </span>
                       </div>
 
-                      {tx.status === 'pending' && (
-                        <div className="flex items-center gap-2">
-                          <button
-                            disabled={processingAction}
-                            onClick={() => {
-                              setRejectionTarget({
-                                type: 'transaksi',
-                                id: tx.id,
-                                subId: tx.type,
-                                nominal: tx.amount,
-                                userId: tx.userId
-                              });
-                              setRejectionReason('');
-                            }}
-                            className="px-3 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 text-xs font-semibold transition-colors cursor-pointer"
-                          >
-                            Tolak
-                          </button>
+                      <div className="flex items-center gap-2">
+                        {tx.status === 'pending' && (
+                          <>
+                            <button
+                              disabled={processingAction}
+                              onClick={() => {
+                                setRejectionTarget({
+                                  type: 'transaksi',
+                                  id: tx.id,
+                                  subId: tx.type,
+                                  nominal: tx.amount,
+                                  userId: tx.userId
+                                });
+                                setRejectionReason('');
+                              }}
+                              className="px-3 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 text-xs font-semibold transition-colors cursor-pointer"
+                            >
+                              Tolak
+                            </button>
 
-                          <button
-                            disabled={processingAction}
-                            onClick={() => handleApproveTransaction(tx)}
-                            className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold shadow-lg shadow-emerald-500/20 transition-all cursor-pointer flex items-center gap-1.5"
-                          >
-                            <Check className="w-4 h-4" />
-                            {tx.type === 'deposit' ? 'Setujui & Tambah Saldo' : 'Setujui & Konfirmasi Transfer'}
-                          </button>
-                        </div>
-                      )}
+                            <button
+                              disabled={processingAction}
+                              onClick={() => handleApproveTransaction(tx)}
+                              className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold shadow-lg shadow-emerald-500/20 transition-all cursor-pointer flex items-center gap-1.5"
+                            >
+                              <Check className="w-4 h-4" />
+                              {tx.type === 'deposit' ? 'Setujui & Tambah Saldo' : 'Setujui Transfer'}
+                            </button>
+                          </>
+                        )}
+
+                        <button
+                          title="Hapus Transaksi"
+                          onClick={() =>
+                            setDeleteConfirmState({
+                              isOpen: true,
+                              target: { type: 'transaksi', id: tx.id, name: `Transaksi ${tx.type} Rp ${tx.amount.toLocaleString('id-ID')}` }
+                            })
+                          }
+                          className="p-2 rounded-xl bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 border border-slate-700 transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -1079,10 +1277,9 @@ export const OwnerDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* TAB 4: VERIFIKASI KLAIM REWARD PELAPOR */}
+        {/* TAB CONTENT: 7. VERIFIKASI KLAIM REWARD PELAPOR */}
         {activeTab === 'reward' && (
           <div className="space-y-6">
-            {/* MANDATORY NOTICE: TIDAK ADA BATASAN WAKTU UNTUK KLAIM REWARD */}
             <div className="p-5 bg-gradient-to-r from-amber-500/20 via-slate-900 to-amber-500/10 rounded-2xl border-2 border-amber-500/40 space-y-2">
               <div className="flex items-center gap-2.5">
                 <Clock className="w-5 h-5 text-amber-400" />
@@ -1151,7 +1348,6 @@ export const OwnerDashboard: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Bank Details & WhatsApp */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 bg-slate-950 rounded-xl border border-slate-800 text-xs">
                       <div>
                         <span className="text-slate-400 block mb-0.5">Rekening Pencairan:</span>
@@ -1180,7 +1376,6 @@ export const OwnerDashboard: React.FC = () => {
                       </div>
                     )}
 
-                    {/* Actions */}
                     {tx.status === 'pending' && (
                       <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
                         <button
@@ -1216,98 +1411,63 @@ export const OwnerDashboard: React.FC = () => {
         )}
       </div>
 
-      {/* TOP UP SALDO MODAL */}
-      {selectedPTForTopUp && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-5">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <PlusCircle className="w-5 h-5 text-emerald-400" />
-                Tambah Dana Kepatuhan
-              </h3>
-              <button
-                onClick={() => setSelectedPTForTopUp(null)}
-                className="text-slate-400 hover:text-white text-xs cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
+      {/* ========================================================= */}
+      {/* ALL INTERACTIVE MODALS */}
+      {/* ========================================================= */}
 
-            <div className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 text-xs space-y-1">
-              <div className="text-slate-400">Target Perusahaan:</div>
-              <div className="text-sm font-bold text-white">{selectedPTForTopUp.namaPT}</div>
-              <div className="text-slate-400 pt-1">
-                Saldo Saat Ini:{' '}
-                <span className="font-mono text-emerald-400 font-bold">
-                  Rp {Number(selectedPTForTopUp.danaTersedia || 0).toLocaleString('id-ID')}
-                </span>
-              </div>
-            </div>
+      {/* 1. LOCK / UNLOCK MODAL */}
+      <LockModal
+        isOpen={lockModalState.isOpen}
+        onClose={() => setLockModalState({ isOpen: false, entity: null, action: 'lock' })}
+        entity={lockModalState.entity}
+        initialAction={lockModalState.action}
+        onConfirm={handleLockConfirm}
+      />
 
-            {topUpSuccess ? (
-              <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-center text-xs text-emerald-400 font-bold flex items-center justify-center gap-2">
-                <CheckCircle2 className="w-4 h-4" />
-                Dana Berhasil Ditambahkan dengan increment()!
-              </div>
-            ) : (
-              <form onSubmit={handleTopUpSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Nominal Penambahan Dana (Rupiah)
-                  </label>
-                  <input
-                    type="number"
-                    min={100000}
-                    step={100000}
-                    required
-                    value={topUpAmount}
-                    onChange={(e) => setTopUpAmount(Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-base font-mono font-bold text-emerald-400 focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
+      {/* 2. EDIT / TOP UP SALDO PERUSAHAAN MODAL */}
+      <EditSaldoModal
+        isOpen={editSaldoState.isOpen}
+        onClose={() => setEditSaldoState({ isOpen: false, entity: null })}
+        entity={editSaldoState.entity}
+        onSave={handleSaveCompanySaldo}
+        onTopUp={handleTopUpCompany}
+      />
 
-                {/* Quick Presets */}
-                <div className="grid grid-cols-3 gap-2">
-                  {[5000000, 10000000, 25000000].map((amt) => (
-                    <button
-                      key={amt}
-                      type="button"
-                      onClick={() => setTopUpAmount(amt)}
-                      className={`py-1.5 px-2 rounded-lg text-xs font-mono transition-colors border cursor-pointer ${
-                        topUpAmount === amt
-                          ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 font-bold'
-                          : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
-                      }`}
-                    >
-                      +{amt / 1000000} Jt
-                    </button>
-                  ))}
-                </div>
+      {/* 3. EDIT / TOP UP SALDO AUDITOR MODAL */}
+      <EditAuditorSaldoModal
+        isOpen={editAuditorSaldoState.isOpen}
+        onClose={() => setEditAuditorSaldoState({ isOpen: false, auditor: null })}
+        auditor={editAuditorSaldoState.auditor}
+        onSave={handleSaveAuditorSaldo}
+        onTopUpFee={handleTopUpAuditorFee}
+      />
 
-                <div className="pt-2 flex items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedPTForTopUp(null)}
-                    className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700 cursor-pointer"
-                  >
-                    Batal
-                  </button>
-                  <button
-                    id="btn-confirm-topup"
-                    type="submit"
-                    disabled={topUpLoading}
-                    className="px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-60 cursor-pointer"
-                  >
-                    {topUpLoading ? 'Menyimpan...' : 'Konfirmasi Tambah Dana'}
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
+      {/* 4. EDIT PROFIL ENTITAS (PT / AUDITOR) MODAL */}
+      <EditProfileModal
+        isOpen={editProfileState.isOpen}
+        onClose={() => setEditProfileState({ isOpen: false, entity: null })}
+        entity={editProfileState.entity}
+        onSave={handleSaveProfile}
+      />
 
-      {/* REJECTION REASON MODAL */}
+      {/* 5. EDIT LAPORAN WHISTLEBLOWING MODAL */}
+      <EditReportModal
+        isOpen={editReportState.isOpen}
+        onClose={() => setEditReportState({ isOpen: false, report: null })}
+        report={editReportState.report}
+        auditorList={auditorList}
+        onSave={handleSaveReport}
+      />
+
+      {/* 6. CONFIRM DELETE MODAL */}
+      <ConfirmDeleteModal
+        isOpen={deleteConfirmState.isOpen}
+        onClose={() => setDeleteConfirmState({ isOpen: false, target: null })}
+        target={deleteConfirmState.target}
+        onConfirm={handleDeleteConfirm}
+      />
+
+      {/* 7. REJECTION REASON MODAL */}
       {rejectionTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
           <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-4">
@@ -1360,7 +1520,7 @@ export const OwnerDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* POSTER MODAL COMPONENT */}
+      {/* 8. POSTER MODAL COMPONENT */}
       {selectedPTForPoster && (
         <PosterModal
           isOpen={isPosterModalOpen}

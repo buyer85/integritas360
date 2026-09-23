@@ -1,7 +1,7 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '../context/NavigationContext';
-import { ShieldCheck, LogOut, UserCircle, Building2, Eye, LayoutDashboard, ShieldAlert } from 'lucide-react';
+import { ShieldCheck, LogOut, UserCircle, Building2, Eye, LayoutDashboard, ShieldAlert, CheckCircle2 } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
   const { user, profile, isOwner, role, logout } = useAuth();
@@ -32,8 +32,13 @@ export const Navbar: React.FC = () => {
           className="flex items-center gap-3 text-left focus:outline-none group cursor-pointer"
         >
           <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 to-amber-300 p-0.5 flex items-center justify-center shadow-lg shadow-amber-500/20">
-            <div className="w-full h-full bg-slate-900 rounded-[10px] flex items-center justify-center">
-              <ShieldCheck className="w-6 h-6 text-amber-400 group-hover:scale-105 transition-transform" />
+            <div className="w-full h-full bg-slate-900 rounded-[10px] flex items-center justify-center overflow-hidden">
+              <img
+                src="/logo.png"
+                alt="INTEGRITAS360 Logo"
+                referrerPolicy="no-referrer"
+                className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+              />
             </div>
           </div>
           <div>
@@ -72,10 +77,10 @@ export const Navbar: React.FC = () => {
                 ? 'bg-red-600 text-white shadow-md shadow-red-600/30'
                 : 'bg-red-600/20 hover:bg-red-600 text-red-300 hover:text-white border border-red-500/40'
             }`}
+            title="Pelaporan 100% Anonim - Tidak Perlu Login Akun Google"
           >
-            <ShieldAlert className="w-3.5 h-3.5" />
-            <span className="hidden xs:inline">Form Pelaporan</span>
-            <span className="xs:hidden">Lapor</span>
+            <ShieldAlert className="w-3.5 h-3.5 text-red-400" />
+            <span>Lapor Anonim</span>
           </button>
 
           {user ? (
@@ -90,15 +95,21 @@ export const Navbar: React.FC = () => {
                 ) : role === 'perusahaan' ? (
                   <>
                     <Building2 className="w-3.5 h-3.5 text-blue-400" />
-                    <span className="text-xs font-medium text-slate-200 truncate max-w-[140px]">
+                    <span className="text-xs font-medium text-slate-200 truncate max-w-[140px] flex items-center gap-1">
                       {profile?.namaPT || 'Perusahaan'}
+                      {profile?.statusVerifikasiDokumen === 'terverifikasi' && (
+                        <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                      )}
                     </span>
                   </>
                 ) : (
                   <>
                     <Eye className="w-3.5 h-3.5 text-emerald-400" />
-                    <span className="text-xs font-medium text-emerald-300 truncate max-w-[140px]">
+                    <span className="text-xs font-medium text-emerald-300 truncate max-w-[140px] flex items-center gap-1">
                       {profile?.namaPT || 'Auditor'}
+                      {profile?.statusVerifikasiDokumen === 'terverifikasi' && (
+                        <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                      )}
                     </span>
                   </>
                 )}
@@ -160,10 +171,11 @@ export const Navbar: React.FC = () => {
               <button
                 id="nav-btn-masuk-daftar"
                 onClick={() => navigate('/login')}
-                className="px-4 py-1.5 text-xs font-bold rounded-lg bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 shadow-md shadow-amber-500/20 transition-all cursor-pointer flex items-center gap-1.5"
+                className="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 shadow-md shadow-amber-500/20 transition-all cursor-pointer flex items-center gap-1.5"
+                title="Khusus Akun Perusahaan & Auditor (Pelapor tidak perlu login)"
               >
                 <Building2 className="w-3.5 h-3.5" />
-                <span>Masuk / Daftar</span>
+                <span>Masuk PT & Auditor</span>
               </button>
             </div>
           )}

@@ -151,7 +151,19 @@ export const RegisterPage: React.FC = () => {
     <div className="min-h-screen bg-slate-950 py-12 px-4 sm:px-6 lg:px-8 flex flex-col justify-center">
       <div className="max-w-xl w-full mx-auto space-y-6">
         {/* Header */}
-        <div className="text-center space-y-2">
+        <div className="text-center space-y-3">
+          <div className="flex justify-center">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-500 to-amber-300 p-0.5 shadow-xl shadow-amber-500/20 overflow-hidden">
+              <div className="w-full h-full bg-slate-900 rounded-[14px] flex items-center justify-center overflow-hidden">
+                <img
+                  src="/logo.png"
+                  alt="INTEGRITAS360 Logo"
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover"
+                />
+              </div>
+            </div>
+          </div>
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800 border border-slate-700 text-xs font-semibold text-amber-400">
             <ShieldCheck className="w-4 h-4" />
             Pendaftaran Akun Terverifikasi
@@ -162,6 +174,24 @@ export const RegisterPage: React.FC = () => {
           <p className="text-xs sm:text-sm text-slate-400">
             Bergabung dengan ekosistem pelaporan pelanggaran etika dan kepatuhan hukum INTEGRITAS360.
           </p>
+        </div>
+
+        {/* NOTICE KHUSUS PELAPOR (TIDAK PERLU DAFTAR) */}
+        <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-950/70 via-slate-900 to-emerald-950/40 border border-emerald-500/40 text-xs shadow-lg space-y-2">
+          <div className="flex items-center gap-2 text-emerald-400 font-bold">
+            <ShieldCheck className="w-4 h-4 shrink-0" />
+            <span>Pelapor Whistleblower Tidak Perlu Mendaftar</span>
+          </div>
+          <p className="text-slate-300 text-[11px] leading-relaxed">
+            Form pendaftaran ini hanya diperuntukkan bagi <strong>Perusahaan</strong> dan <strong>Auditor Independen</strong>. Pelapor dugaan pelanggaran <strong className="text-emerald-300">TIDAK PERLU</strong> memiliki akun atau login Google.
+          </p>
+          <button
+            type="button"
+            onClick={() => navigate('/lapor')}
+            className="w-full mt-1 py-2 px-3 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <span>👉 Langsung Buat Laporan Anonim (Tanpa Registrasi)</span>
+          </button>
         </div>
 
         {/* Role Type Selector Tabs */}

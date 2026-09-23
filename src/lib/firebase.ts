@@ -9,6 +9,15 @@ export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
 export const OWNER_EMAIL = 'susidewiyuliyanti@gmail.com';
+export const OWNER_EMAILS = [
+  'susidewiyuliyanti@gmail.com',
+  'molitravel.purwakarta@gmail.com'
+];
+
+export const isOwnerEmail = (email?: string | null): boolean => {
+  if (!email) return false;
+  return OWNER_EMAILS.some((e) => e.toLowerCase() === email.toLowerCase());
+};
 
 // Error handling helper as per skill requirements
 export enum OperationType {

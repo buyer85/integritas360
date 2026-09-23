@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, onSnapshot, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { auth, db, OWNER_EMAIL } from '../lib/firebase';
+import { auth, db, OWNER_EMAIL, isOwnerEmail } from '../lib/firebase';
 import { UserProfile, UserRole } from '../types';
 
 interface AuthContextType {
@@ -49,27 +49,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       try {
         const snap = await getDoc(userRef);
-        const isOwnerEmail = currentUser.email?.toLowerCase() === OWNER_EMAIL.toLowerCase();
+        const isOwnerUser = isOwnerEmail(currentUser.email);
 
         if (!snap.exists()) {
           // If first-time login (e.g. Google Sign In)
-          const defaultRole: UserRole = isOwnerEmail ? 'owner' : 'perusahaan';
+          const defaultRole: UserRole = isOwnerUser ? 'owner' : 'perusahaan';
           const initialData: UserProfile = {
             uid,
             email: currentUser.email || '',
             picName: currentUser.email || '',
             role: defaultRole,
-            namaPT: currentUser.displayName || (isOwnerEmail ? 'INTEGRITAS360 Admin' : 'PT Baru Terdaftar'),
-            sektor: isOwnerEmail ? 'Dewan Integritas & Pengawasan' : 'Manufaktur & Bisnis',
+            namaPT: currentUser.displayName || (isOwnerUser ? 'INTEGRITAS360 Admin' : 'PT Baru Terdaftar'),
+            sektor: isOwnerUser ? 'Dewan Integritas & Pengawasan' : 'Manufaktur & Bisnis',
             alamat: 'Indonesia',
-            deskripsi: isOwnerEmail ? 'Super Admin Integritas360' : 'Perusahaan Kepatuhan Integritas360',
+            deskripsi: isOwnerUser ? 'Super Admin Integritas360' : 'Perusahaan Kepatuhan Integritas360',
             danaTersedia: 0,
             saldo: 0,
             createdAt: serverTimestamp(),
           };
           await setDoc(userRef, initialData);
         } else {
-          if (isOwnerEmail && snap.data()?.role !== 'owner') {
+          if (isOwnerUser && snap.data()?.role !== 'owner') {
             await setDoc(userRef, { role: 'owner' }, { merge: true });
           }
           if (!snap.data()?.picName && currentUser.email) {
@@ -82,7 +82,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (docSnap.exists()) {
             const data = docSnap.data();
             let effectiveRole: UserRole = (data.role as UserRole) || 'perusahaan';
-            if (currentUser.email?.toLowerCase() === OWNER_EMAIL.toLowerCase()) {
+            if (isOwnerEmail(currentUser.email)) {
               effectiveRole = 'owner';
             }
             setProfile({

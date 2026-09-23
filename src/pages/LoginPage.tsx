@@ -104,15 +104,24 @@ export const LoginPage: React.FC = () => {
     <div className="min-h-screen bg-slate-950 py-12 px-4 sm:px-6 lg:px-8 flex flex-col justify-center">
       <div className="max-w-md w-full mx-auto space-y-6">
         {/* Header */}
-        <div className="text-center space-y-2">
+        <div className="text-center space-y-3">
+          <div className="flex justify-center">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-500 to-amber-300 p-0.5 shadow-xl shadow-amber-500/20 overflow-hidden">
+              <div className="w-full h-full bg-slate-900 rounded-[14px] flex items-center justify-center overflow-hidden">
+                <img
+                  src="/logo.png"
+                  alt="INTEGRITAS360 Logo"
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover"
+                />
+              </div>
+            </div>
+          </div>
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800 border border-slate-700 text-xs font-semibold text-amber-400">
             <ShieldCheck className="w-4 h-4" />
             Portal Masuk INTEGRITAS360
           </div>
           <h2 className="text-2xl sm:text-3xl font-extrabold text-white">Masuk ke Sistem</h2>
-          <p className="text-xs sm:text-sm text-slate-400">
-            Akses dashboard khusus Owner, Perusahaan, atau Auditor.
-          </p>
         </div>
 
         {/* Error Notification */}

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { collection, addDoc, updateDoc, serverTimestamp, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, serverTimestamp, query, where, getDocs, doc, getDoc, increment } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import {
   ShieldCheck,
@@ -25,15 +25,46 @@ import {
   Info,
   CreditCard,
   Clock,
-  Banknote
+  Banknote,
+  UserCheck,
+  Coins,
+  Scale
 } from 'lucide-react';
 import { WhistleblowingReport } from '../types';
+
+export const FINANCIAL_CATEGORIES = [
+  'Kecurangan Finansial & Fraud',
+  'Korupsi & Penyuapan (Bribery)',
+  'Penggelapan Aset & Kas Perusahaan',
+  'Manipulasi Pembukuan & Faktur Fiktif',
+  'Mark-up Anggaran Pengadaan Barang/Jasa',
+  'Benturan Kepentingan Berdampak Finansial'
+];
+
+export const ETHICAL_CATEGORIES = [
+  'Pelecehan Seksual, Diskriminasi & Intimidasi',
+  'Penyalahgunaan Wewenang Jabatan',
+  'Pelanggaran Kode Etik Perusahaan',
+  'Pelanggaran K3 & Keselamatan Kerja',
+  'Pelanggaran Standar Lingkungan Hidup',
+  'Kebocoran Data Rahasia Perusahaan',
+  'Nepotisme & Perlakuan Tidak Adil'
+];
 
 interface CompanyOption {
   uid: string;
   namaPT: string;
   sektor?: string;
   danaTersedia?: number;
+}
+
+interface AuditorOption {
+  uid: string;
+  namaPT: string;
+  picName?: string;
+  email: string;
+  sektor?: string;
+  statusVerifikasiDokumen?: string;
 }
 
 interface EvidenceSlot {
@@ -134,10 +165,17 @@ export const ReportFormSection: React.FC<ReportFormSectionProps> = ({
   const [targetCompanyData, setTargetCompanyData] = useState<CompanyOption | null>(null);
   const [loadingCompanies, setLoadingCompanies] = useState<boolean>(true);
 
+  // Auditor Selection State (Pelapor hanya bisa memilih SATU auditor independen)
+  const [auditors, setAuditors] = useState<AuditorOption[]>([]);
+  const [selectedAuditorId, setSelectedAuditorId] = useState<string>('');
+  const [loadingAuditors, setLoadingAuditors] = useState<boolean>(true);
+
   const [mode, setMode] = useState<'lapor' | 'tracking'>('lapor');
 
-  // Form State
-  const [kategori, setKategori] = useState('Korupsi & Penyuapan');
+  // Form State: Pelanggaran Finansial vs Etik
+  const [tipePelanggaran, setTipePelanggaran] = useState<'finansial' | 'etik'>('finansial');
+  const [estimasiKerugian, setEstimasiKerugian] = useState<string>('');
+  const [kategori, setKategori] = useState('Kecurangan Finansial & Fraud');
   const [judul, setJudul] = useState('');
   const [deskripsi, setDeskripsi] = useState('');
   const [tanggalKejadian, setTanggalKejadian] = useState('');
@@ -224,6 +262,36 @@ export const ReportFormSection: React.FC<ReportFormSectionProps> = ({
     }
 
     loadCompanies();
+
+    async function loadAuditors() {
+      try {
+        setLoadingAuditors(true);
+        const q = query(collection(db, 'users'), where('role', '==', 'auditor'));
+        const snap = await getDocs(q);
+        const list: AuditorOption[] = [];
+        snap.forEach((d) => {
+          const data = d.data();
+          list.push({
+            uid: d.id,
+            namaPT: data.namaPT || data.picName || 'Kantor Hukum / Auditor Independen',
+            picName: data.picName,
+            email: data.email || '',
+            sektor: data.sektor,
+            statusVerifikasiDokumen: data.statusVerifikasiDokumen
+          });
+        });
+        setAuditors(list);
+        if (list.length > 0) {
+          setSelectedAuditorId(list[0].uid);
+        }
+      } catch (err) {
+        console.error('Error loading auditors for report form:', err);
+      } finally {
+        setLoadingAuditors(false);
+      }
+    }
+
+    loadAuditors();
   }, [initialCompanyId]);
 
   const handleCompanyChange = (uid: string) => {
@@ -323,16 +391,39 @@ export const ReportFormSection: React.FC<ReportFormSectionProps> = ({
       .filter((slot) => Boolean(slot.fileDataUrl))
       .map((slot) => slot.fileDataUrl as string);
 
+    // Reporter must choose exactly ONE auditor
+    if (auditors.length > 0 && !selectedAuditorId) {
+      setSubmitError('Harap pilih 1 auditor independen yang akan menelaah laporan ini.');
+      return;
+    }
+
+    const cleanKerugian = Number(estimasiKerugian.replace(/\D/g, '')) || 0;
+    if (tipePelanggaran === 'finansial' && cleanKerugian <= 0) {
+      setSubmitError('Untuk pelanggaran finansial, mohon isi estimasi nilai kerugian perusahaan (minimal Rp 100.000).');
+      return;
+    }
+
+    const minReward = tipePelanggaran === 'finansial' ? Math.round(cleanKerugian * 0.02) : 0;
+    const chosenAuditor = auditors.find((a) => a.uid === selectedAuditorId);
+
     try {
       setSubmitting(true);
       const secretToken = `WB-${Math.random().toString(36).substring(2, 8).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
       const targetCompany = getResolvedCompanyName();
+
+      const assignedAuditorId = selectedAuditorId || (auditors[0]?.uid || '');
+      const assignedAuditorName = chosenAuditor?.namaPT || chosenAuditor?.picName || 'Auditor Independen Terdaftar';
 
       await addDoc(collection(db, 'reports'), {
         companyId: selectedCompanyId || 'general',
         companyName: targetCompany,
         judul: judul.trim(),
         kategori,
+        tipePelanggaran,
+        estimasiKerugian: tipePelanggaran === 'finansial' ? cleanKerugian : 0,
+        rewardMinAmount: minReward,
+        rewardAmount: minReward, // Nilai default reward minimal 2% untuk finansial
+        rewardStatusPerusahaan: 'belum_ditentukan',
         deskripsi: deskripsi.trim(),
         tanggalKejadian: tanggalKejadian || null,
         lokasi: lokasi.trim() || null,
@@ -342,6 +433,10 @@ export const ReportFormSection: React.FC<ReportFormSectionProps> = ({
         whatsappPelapor: whatsappPelapor.trim() || null,
         buktiFiles,
         isContoh: Boolean(isContohMode),
+        targetAuditorId: assignedAuditorId,
+        targetAuditorName: assignedAuditorName,
+        targetAuditorIds: assignedAuditorId ? [assignedAuditorId] : [],
+        targetAuditorNames: [assignedAuditorName],
         status: 'baru',
         tokenAkses: secretToken,
         createdAt: serverTimestamp(),
@@ -381,6 +476,11 @@ export const ReportFormSection: React.FC<ReportFormSectionProps> = ({
           companyName: d.companyName,
           judul: d.judul,
           kategori: d.kategori,
+          tipePelanggaran: d.tipePelanggaran || (d.estimasiKerugian ? 'finansial' : 'etik'),
+          estimasiKerugian: d.estimasiKerugian || 0,
+          rewardMinAmount: d.rewardMinAmount || 0,
+          rewardAmount: d.rewardAmount || (d.tipePelanggaran === 'finansial' ? d.rewardMinAmount : 10000000),
+          rewardStatusPerusahaan: d.rewardStatusPerusahaan || 'belum_ditentukan',
           deskripsi: d.deskripsi,
           tanggalKejadian: d.tanggalKejadian,
           lokasi: d.lokasi,
@@ -388,11 +488,12 @@ export const ReportFormSection: React.FC<ReportFormSectionProps> = ({
           tokenAkses: d.tokenAkses,
           pelaporAnonim: d.pelaporAnonim !== false,
           catatanAuditor: d.catatanAuditor,
-          auditorName: d.auditorName,
+          auditorName: d.auditorName || d.targetAuditorName,
+          targetAuditorName: d.targetAuditorName,
           buktiFiles: d.buktiFiles || [],
           whatsappPelapor: d.whatsappPelapor,
           isContoh: d.isContoh || false,
-          rewardAmount: d.rewardAmount || 10000000,
+          rewardClaimed: d.rewardClaimed || false,
           rewardClaimStatus: d.rewardClaimStatus,
           rewardClaimBank: d.rewardClaimBank
         });
@@ -420,17 +521,40 @@ export const ReportFormSection: React.FC<ReportFormSectionProps> = ({
     try {
       setClaimingReward(true);
       setClaimError('');
-      const rewardNominal = trackedReport.rewardAmount || 10000000;
+      const rewardNominal = trackedReport.rewardAmount || (trackedReport.tipePelanggaran === 'finansial' ? trackedReport.rewardMinAmount : 0) || 5000000;
+      let companyDeducted = false;
 
-      // 1. Simpan ke koleksi transactions dengan status pending untuk diverifikasi administrator
+      // Otomatis kurangi saldo perusahaan jika akun perusahaan terdaftar
+      if (trackedReport.companyId && trackedReport.companyId !== 'general') {
+        const compRef = doc(db, 'users', trackedReport.companyId);
+        const compSnap = await getDoc(compRef);
+        if (compSnap.exists()) {
+          const compData = compSnap.data();
+          const currentDana = Number(compData.danaTersedia || 0);
+          const currentSaldo = Number(compData.saldo || 0);
+
+          if (currentDana >= rewardNominal || currentSaldo >= rewardNominal) {
+            await updateDoc(compRef, {
+              danaTersedia: increment(-rewardNominal),
+              saldo: increment(-rewardNominal)
+            });
+            companyDeducted = true;
+          }
+        }
+      }
+
+      const claimFinalStatus = companyDeducted ? 'selesai' : 'pending';
+
+      // 1. Simpan ke koleksi transactions dengan status pencairan
       await addDoc(collection(db, 'transactions'), {
         type: 'claim_reward',
         amount: rewardNominal,
-        status: 'pending',
+        status: claimFinalStatus,
+        userId: trackedReport.companyId,
         claimReportToken: trackedReport.tokenAkses,
         claimReportId: trackedReport.id || '',
         companyName: trackedReport.companyName || 'Perusahaan Terlapor',
-        keterangan: `Klaim reward pelapor untuk tiket #${trackedReport.tokenAkses} (${trackedReport.companyName || 'PT Terlapor'})`,
+        keterangan: `Klaim reward pelapor tiket #${trackedReport.tokenAkses} (${trackedReport.companyName || 'PT Terlapor'})`,
         whatsapp: claimWhatsapp.trim() || trackedReport.whatsappPelapor || '',
         bankDetails: {
           bankName: claimBank,
@@ -444,13 +568,16 @@ export const ReportFormSection: React.FC<ReportFormSectionProps> = ({
       if (trackedReport.id) {
         const reportRef = doc(db, 'reports', trackedReport.id);
         await updateDoc(reportRef, {
+          rewardClaimed: true,
           rewardClaimStatus: 'pending',
+          rewardAmount: rewardNominal,
           rewardClaimBank: {
             bankName: claimBank,
             accountNumber: claimAccount.trim(),
             holderName: claimHolder.trim()
           },
-          whatsappPelapor: claimWhatsapp.trim() || trackedReport.whatsappPelapor || ''
+          whatsappPelapor: claimWhatsapp.trim() || trackedReport.whatsappPelapor || '',
+          rewardClaimWhatsapp: claimWhatsapp.trim() || trackedReport.whatsappPelapor || '',
         });
       }
 
@@ -458,18 +585,24 @@ export const ReportFormSection: React.FC<ReportFormSectionProps> = ({
         prev
           ? {
               ...prev,
+              rewardClaimed: true,
               rewardClaimStatus: 'pending',
+              rewardAmount: rewardNominal,
               rewardClaimBank: {
                 bankName: claimBank,
                 accountNumber: claimAccount.trim(),
                 holderName: claimHolder.trim()
-              }
+              },
+              whatsappPelapor: claimWhatsapp.trim() || prev.whatsappPelapor || '',
+              rewardClaimWhatsapp: claimWhatsapp.trim() || prev.whatsappPelapor || '',
             }
           : null
       );
 
       setClaimSuccess(
-        'Permintaan klaim reward berhasil dikirim! Dokumen dan nomor rekening akan diverifikasi oleh Administrator INTEGRITAS360 sebelum pencairan dana ditransfer.'
+        `Klaim reward sebesar Rp ${rewardNominal.toLocaleString('id-ID')} berhasil diajukan! Status: Maksimal 1x24 jam reward akan masuk ke rekening/wallet Anda. ${
+          claimWhatsapp.trim() ? `Notifikasi pengiriman dana akan dikirim ke WhatsApp: ${claimWhatsapp.trim()}` : ''
+        }`
       );
     } catch (err: any) {
       console.error('Error submitting claim reward:', err);
@@ -665,6 +798,24 @@ export const ReportFormSection: React.FC<ReportFormSectionProps> = ({
             onSubmit={handleSubmitReport}
             className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 sm:p-8 space-y-5 shadow-2xl"
           >
+            {/* JAMINAN MUTLAK: BEBAS & TANPA LOGIN GOOGLE */}
+            <div className="p-4 rounded-xl bg-gradient-to-r from-emerald-950/60 via-slate-950 to-slate-950 border border-emerald-500/40 flex items-start gap-3 text-xs">
+              <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-bold text-emerald-300">
+                    Prinsip Dasar Anonim: Pelapor Tidak Harus Login Akun Google
+                  </span>
+                  <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-semibold px-2 py-0.5 rounded border border-emerald-500/30">
+                    Bebas Akun
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  Laporan Anda dikirim langsung ke Auditor Independen secara terenkripsi. Anda <strong>tidak perlu login ataupun memiliki akun Google / email</strong>. Cukup kirim form dan simpan <strong>Nomor Tiket Rahasia</strong> untuk memantau proses audit & pencairan reward.
+                </p>
+              </div>
+            </div>
+
             {submitError && (
               <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300 flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 shrink-0 text-red-400" />
@@ -733,25 +884,229 @@ export const ReportFormSection: React.FC<ReportFormSectionProps> = ({
               )}
             </div>
 
-            {/* Kategori Pelanggaran */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                Kategori Pelanggaran *
+            {/* Pilihan SATU Auditor Independen Penelaah Laporan */}
+            <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-white flex items-center gap-1.5">
+                  <UserCheck className="w-4 h-4 text-emerald-400" />
+                  Pilih 1 Auditor Independen Penelaah Laporan *
+                </label>
+                <p className="text-[11px] text-slate-400">
+                  Pelapor hanya dapat memilih satu auditor independen berlisensi yang bertugas menelaah dan memvalidasi laporan ini.
+                </p>
+              </div>
+
+              {loadingAuditors ? (
+                <div className="py-4 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                  Memuat daftar auditor terdaftar...
+                </div>
+              ) : auditors.length === 0 ? (
+                <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-400">
+                  Belum ada auditor terdaftar, laporan akan ditelaah oleh tim kepatuhan pusat INTEGRITAS360.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                  {auditors.map((aud) => {
+                    const isSelected = selectedAuditorId === aud.uid;
+                    return (
+                      <div
+                        key={aud.uid}
+                        onClick={() => setSelectedAuditorId(aud.uid)}
+                        className={`flex items-start gap-3 p-3 rounded-xl border transition-all cursor-pointer select-none ${
+                          isSelected
+                            ? 'bg-emerald-950/50 border-emerald-500 shadow-md shadow-emerald-500/10 ring-1 ring-emerald-500/50'
+                            : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 opacity-80'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="selectedAuditor"
+                          checked={isSelected}
+                          onChange={() => setSelectedAuditorId(aud.uid)}
+                          className="mt-0.5 text-emerald-500 focus:ring-emerald-500 cursor-pointer w-4 h-4"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-xs font-bold text-white">
+                              {aud.namaPT}
+                            </span>
+                            {aud.statusVerifikasiDokumen === 'terverifikasi' && (
+                              <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.5 rounded-full">
+                                <CheckCircle2 className="w-2.5 h-2.5" />
+                                Terverifikasi
+                              </span>
+                            )}
+                          </div>
+                          {aud.picName && (
+                            <p className="text-[10px] text-slate-400 mt-0.5">Praktisi: {aud.picName}</p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {auditors.length > 0 && !selectedAuditorId && (
+                <p className="text-[11px] text-amber-400 flex items-center gap-1 font-semibold">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  Harap pilih salah satu auditor di atas.
+                </p>
+              )}
+            </div>
+
+            {/* JENIS PELANGGARAN: ETIK vs FINANSIAL */}
+            <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-3">
+              <label className="block text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                <Scale className="w-4 h-4 text-amber-400" />
+                Jenis Pelanggaran *
               </label>
-              <select
-                value={kategori}
-                onChange={(e) => setKategori(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500 font-medium"
-              >
-                <option value="Korupsi & Penyuapan">Korupsi & Penyuapan (Bribery)</option>
-                <option value="Kecurangan Finansial & Fraud">Kecurangan Finansial & Fraud</option>
-                <option value="Pelecehan & Intimidasi">Pelecehan, Diskriminasi & Intimidasi</option>
-                <option value="Pencurian & Penggelapan Aset">Pencurian & Penggelapan Aset</option>
-                <option value="Pelanggaran K3 & Lingkungan">Pelanggaran K3 & Keselamatan Kerja</option>
-                <option value="Benturan Kepentingan & Gratifikasi">Benturan Kepentingan & Gratifikasi</option>
-                <option value="Penyalahgunaan Wewenang Jabatan">Penyalahgunaan Wewenang Jabatan</option>
-                <option value="Pelanggaran Kode Etik Lainnya">Pelanggaran Kode Etik Lainnya</option>
-              </select>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Opsi Finansial */}
+                <div
+                  onClick={() => {
+                    setTipePelanggaran('finansial');
+                    setKategori(FINANCIAL_CATEGORIES[0]);
+                  }}
+                  className={`p-3.5 rounded-xl border transition-all cursor-pointer select-none space-y-1.5 ${
+                    tipePelanggaran === 'finansial'
+                      ? 'bg-amber-500/10 border-amber-500 shadow-md shadow-amber-500/10 ring-1 ring-amber-500/40'
+                      : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 opacity-75'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-amber-500/20 flex items-center justify-center text-amber-400">
+                        <Coins className="w-4 h-4" />
+                      </div>
+                      <span className="text-xs font-bold text-white">Pelanggaran Finansial</span>
+                    </div>
+                    <input
+                      type="radio"
+                      name="tipePelanggaran"
+                      checked={tipePelanggaran === 'finansial'}
+                      onChange={() => {
+                        setTipePelanggaran('finansial');
+                        setKategori(FINANCIAL_CATEGORIES[0]);
+                      }}
+                      className="text-amber-500 focus:ring-amber-500 cursor-pointer"
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-tight">
+                    Fraud, korupsi, mark-up anggaran, manipulasi kas, suap & penggelapan aset.
+                  </p>
+                  <div className="pt-1">
+                    <span className="inline-block text-[10px] font-semibold text-amber-300 bg-amber-500/20 border border-amber-500/40 px-2 py-0.5 rounded-full">
+                      Reward: Minimal 2% dari Estimasi Nilai Kerugian
+                    </span>
+                  </div>
+                </div>
+
+                {/* Opsi Etik */}
+                <div
+                  onClick={() => {
+                    setTipePelanggaran('etik');
+                    setKategori(ETHICAL_CATEGORIES[0]);
+                  }}
+                  className={`p-3.5 rounded-xl border transition-all cursor-pointer select-none space-y-1.5 ${
+                    tipePelanggaran === 'etik'
+                      ? 'bg-purple-500/10 border-purple-500 shadow-md shadow-purple-500/10 ring-1 ring-purple-500/40'
+                      : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 opacity-75'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-purple-500/20 flex items-center justify-center text-purple-400">
+                        <Scale className="w-4 h-4" />
+                      </div>
+                      <span className="text-xs font-bold text-white">Pelanggaran Etik</span>
+                    </div>
+                    <input
+                      type="radio"
+                      name="tipePelanggaran"
+                      checked={tipePelanggaran === 'etik'}
+                      onChange={() => {
+                        setTipePelanggaran('etik');
+                        setKategori(ETHICAL_CATEGORIES[0]);
+                      }}
+                      className="text-purple-500 focus:ring-purple-500 cursor-pointer"
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-tight">
+                    Pelecehan, intimidasi, diskriminasi, penyalahgunaan wewenang & pelanggaran SOP/K3.
+                  </p>
+                  <div className="pt-1">
+                    <span className="inline-block text-[10px] font-semibold text-purple-300 bg-purple-500/20 border border-purple-500/40 px-2 py-0.5 rounded-full">
+                      Reward: Ditentukan oleh Perusahaan
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Sub-form Khusus Finansial: Estimasi Kerugian Finansial & Kalkulasi Minimal 2% */}
+              {tipePelanggaran === 'finansial' && (
+                <div className="p-3.5 rounded-xl bg-amber-950/30 border border-amber-500/30 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-amber-200">
+                      Estimasi Nilai Kerugian Finansial Perusahaan (Rp) *
+                    </label>
+                    <span className="text-[10px] text-amber-400 font-medium">
+                      Aturan: Reward Minimal 2%
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Contoh: 150000000 (tanpa titik/koma)"
+                    value={estimasiKerugian}
+                    onChange={(e) => setEstimasiKerugian(e.target.value.replace(/\D/g, ''))}
+                    className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-3.5 py-2 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
+                  />
+                  {Number(estimasiKerugian) > 0 && (
+                    <div className="flex flex-wrap items-center justify-between text-xs pt-1 border-t border-amber-500/20">
+                      <span className="text-slate-300 text-[11px]">
+                        Estimasi Kerugian: <strong>Rp {Number(estimasiKerugian).toLocaleString('id-ID')}</strong>
+                      </span>
+                      <span className="text-amber-400 font-bold font-mono text-[11px] bg-amber-500/20 px-2 py-0.5 rounded">
+                        Minimal Reward Pelapor (2%): Rp {Math.round(Number(estimasiKerugian) * 0.02).toLocaleString('id-ID')}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Banner Penjelasan Khusus Etik */}
+              {tipePelanggaran === 'etik' && (
+                <div className="p-3.5 rounded-xl bg-purple-950/30 border border-purple-500/30 text-xs text-purple-200 space-y-1">
+                  <div className="font-bold flex items-center gap-1.5 text-purple-300">
+                    <Info className="w-4 h-4 text-purple-400 shrink-0" />
+                    Ketentuan Reward Pelanggaran Etik
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    Untuk pelanggaran non-finansial/kode etik, besaran reward akan ditentukan secara diskresioner oleh pihak Perusahaan pada dashboard manajemen setelah bukti divalidasi oleh Auditor Independen.
+                  </p>
+                </div>
+              )}
+
+              {/* Kategori Spesifik Sesuai Tipe */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Sub-Kategori Pelanggaran *
+                </label>
+                <select
+                  value={kategori}
+                  onChange={(e) => setKategori(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500 font-medium"
+                >
+                  {(tipePelanggaran === 'finansial' ? FINANCIAL_CATEGORIES : ETHICAL_CATEGORIES).map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             {/* Judul */}
@@ -1037,6 +1392,16 @@ export const ReportFormSection: React.FC<ReportFormSectionProps> = ({
       ) : (
         /* Tracking Screen */
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 sm:p-8 space-y-5 shadow-2xl">
+          <div className="p-3.5 rounded-xl bg-blue-950/30 border border-blue-500/30 text-xs text-blue-200/90 flex items-start gap-2.5">
+            <ShieldCheck className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+            <div className="space-y-0.5">
+              <span className="font-bold text-white">Pemantauan Anonim Tanpa Akun Google:</span>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                Anda tidak perlu login. Cukup masukkan Nomor Tiket Rahasia yang didapat saat mengirim laporan untuk melihat hasil audit, perkembangan investigasi, dan mengajukan klaim reward tunai.
+              </p>
+            </div>
+          </div>
+
           <form onSubmit={handleTrackReport} className="space-y-3">
             <label className="block text-xs font-semibold text-slate-300">
               Masukkan Nomor Tiket Rahasia Anda
@@ -1156,8 +1521,42 @@ export const ReportFormSection: React.FC<ReportFormSectionProps> = ({
                 </p>
               )}
 
-              {/* KLAIM REWARD JIKA STATUS LAPORAN = SELESAI / TERBUKTI */}
-              {trackedReport.status === 'selesai' && (
+              {/* Rincian Kategori Pelanggaran & Hak Reward */}
+              <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-2 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-400 font-medium">Jenis Pelanggaran:</span>
+                    {trackedReport.tipePelanggaran === 'finansial' ? (
+                      <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold text-[10px]">
+                        PELANGGARAN FINANSIAL
+                      </span>
+                    ) : (
+                      <span className="px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40 font-bold text-[10px]">
+                        PELANGGARAN ETIK
+                      </span>
+                    )}
+                  </div>
+                  {trackedReport.targetAuditorName && (
+                    <span className="text-slate-400 text-[11px]">
+                      Auditor: <strong className="text-white">{trackedReport.targetAuditorName}</strong>
+                    </span>
+                  )}
+                </div>
+
+                {trackedReport.tipePelanggaran === 'finansial' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-slate-800 text-[11px]">
+                    <div className="text-slate-400">
+                      Estimasi Kerugian Perusahaan: <strong className="text-white">Rp {Number(trackedReport.estimasiKerugian || 0).toLocaleString('id-ID')}</strong>
+                    </div>
+                    <div className="text-amber-400 font-medium">
+                      Ketentuan Reward Minimal (2%): <strong>Rp {Number(trackedReport.rewardMinAmount || Math.round((trackedReport.estimasiKerugian || 0) * 0.02)).toLocaleString('id-ID')}</strong>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* KLAIM REWARD JIKA STATUS LAPORAN = SELESAI / TERBUKTI ATAU REWARD TELAH DITETAPKAN */}
+              {(trackedReport.status === 'selesai' || Boolean(trackedReport.rewardAmount)) && (
                 <div className="rounded-2xl border-2 border-amber-500/50 bg-gradient-to-br from-amber-950/40 via-slate-900 to-slate-950 p-5 sm:p-6 shadow-2xl space-y-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-2.5">
@@ -1169,22 +1568,24 @@ export const ReportFormSection: React.FC<ReportFormSectionProps> = ({
                           Hak Pencairan Reward Tunai Pelapor
                         </h4>
                         <p className="text-[11px] text-amber-300/90 font-medium">
-                          Laporan dinyatakan terbukti valid oleh auditor independen.
+                          {trackedReport.tipePelanggaran === 'finansial'
+                            ? 'Reward dihitung minimal 2% dari estimasi nilai kerugian finansial.'
+                            : 'Reward etika ditetapkan secara diskresioner oleh manajemen Perusahaan.'}
                         </p>
                       </div>
                     </div>
 
                     <div className="text-right">
                       <span className="text-[10px] text-slate-400 block uppercase tracking-wider font-semibold">
-                        Nominal Reward
+                        Nominal Reward Ditetapkan
                       </span>
                       <span className="text-base sm:text-lg font-mono font-bold text-amber-400">
-                        Rp {(trackedReport.rewardAmount || 10000000).toLocaleString('id-ID')}
+                        Rp {(trackedReport.rewardAmount || trackedReport.rewardMinAmount || 5000000).toLocaleString('id-ID')}
                       </span>
                     </div>
                   </div>
 
-                  {/* KETENTUAN UTAMA: TIDAK ADA BATASAN WAKTU & VERIFIKASI ADMINISTRATOR */}
+                  {/* KETENTUAN UTAMA: TIDAK ADA BATASAN WAKTU & OTOMATIS POTONG SALDO */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
                     <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-200/90 flex items-start gap-2">
                       <Clock className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
@@ -1195,7 +1596,7 @@ export const ReportFormSection: React.FC<ReportFormSectionProps> = ({
                     <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 flex items-start gap-2">
                       <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                       <div>
-                        <strong>Verifikasi Administrator:</strong> Permintaan klaim reward dan nomor rekening akan diverifikasi oleh Administrator sebelum dana ditransfer.
+                        <strong>Otomatisasi Sistem:</strong> Saat klaim diajukan dan disetujui, saldo penjaminan perusahaan akan otomatis terpotong untuk pencairan.
                       </div>
                     </div>
                   </div>
@@ -1207,20 +1608,40 @@ export const ReportFormSection: React.FC<ReportFormSectionProps> = ({
                       <div>
                         <p className="font-bold text-white">Reward Telah Dicairkan & Ditransfer!</p>
                         <p className="text-[11px] text-emerald-400/80 mt-0.5">
-                          Administrator telah memverifikasi dan mentransfer dana reward ke rekening Anda.
+                          Dana reward telah berhasil ditransfer ke rekening bank / e-wallet Anda. Terima kasih atas integritas dan keberanian Anda.
                         </p>
+                        {(trackedReport.whatsappPelapor || trackedReport.rewardClaimWhatsapp) && (
+                          <p className="text-[11px] text-emerald-300 font-semibold mt-1">
+                            Notifikasi & konfirmasi transfer telah dikirim ke WhatsApp: {trackedReport.whatsappPelapor || trackedReport.rewardClaimWhatsapp}
+                          </p>
+                        )}
                       </div>
                     </div>
                   )}
 
                   {trackedReport.rewardClaimStatus === 'pending' && (
-                    <div className="p-4 rounded-xl bg-amber-950/50 border border-amber-500/40 text-amber-300 text-xs flex items-center gap-3">
-                      <Clock className="w-5 h-5 text-amber-400 shrink-0 animate-pulse" />
-                      <div>
-                        <p className="font-bold text-white">Klaim Reward Sedang Diverifikasi oleh Administrator</p>
-                        <p className="text-[11px] text-amber-300/80 mt-0.5">
-                          Administrator sedang meninjau permintaan pencairan reward Anda. Dana akan segera ditransfer ke rekening bank tujuan.
+                    <div className="p-4 rounded-xl bg-amber-950/50 border border-amber-500/40 text-amber-300 text-xs flex items-start gap-3">
+                      <Clock className="w-5 h-5 text-amber-400 shrink-0 mt-0.5 animate-pulse" />
+                      <div className="space-y-1.5">
+                        <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-bold uppercase tracking-wider">
+                          KLAIM DALAM PROSES PENCAIRAN
+                        </div>
+                        <p className="font-extrabold text-sm text-white">
+                          Status: 1x24 Jam reward akan masuk ke rekening/wallet pelapor
                         </p>
+                        <p className="text-[11px] text-slate-300 leading-relaxed">
+                          Permintaan klaim Anda telah diverifikasi oleh sistem. Dana reward sebesar <strong className="text-amber-400">Rp {(trackedReport.rewardAmount || 5000000).toLocaleString('id-ID')}</strong> dalam proses pengiriman dan dijamin masuk ke rekening/e-wallet Anda dalam maksimal 1x24 jam.
+                        </p>
+                        {(trackedReport.whatsappPelapor || trackedReport.rewardClaimWhatsapp) ? (
+                          <div className="flex items-center gap-1.5 text-[11px] text-emerald-300 font-semibold pt-0.5">
+                            <MessageCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                            <span>Notifikasi WhatsApp Aktif: Anda akan menerima pemberitahuan otomatis di <strong>{trackedReport.whatsappPelapor || trackedReport.rewardClaimWhatsapp}</strong> saat transfer berhasil.</span>
+                          </div>
+                        ) : (
+                          <p className="text-[11px] text-slate-400 italic pt-0.5">
+                            Anda tidak menyertakan nomor WhatsApp. Silakan cek mutasi rekening/e-wallet Anda secara berkala dalam 1x24 jam.
+                          </p>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1229,9 +1650,12 @@ export const ReportFormSection: React.FC<ReportFormSectionProps> = ({
                   {!trackedReport.rewardClaimStatus && (
                     <form onSubmit={handleClaimRewardSubmit} className="space-y-3.5 pt-2 border-t border-slate-800">
                       {claimSuccess && (
-                        <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300 flex items-center gap-2">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                          <span>{claimSuccess}</span>
+                        <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300 flex items-start gap-2.5">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                          <div className="space-y-1">
+                            <p className="font-bold text-white">Status: 1x24 Jam reward akan masuk ke rekening/wallet pelapor</p>
+                            <p className="text-[11px] text-emerald-300/90">{claimSuccess}</p>
+                          </div>
                         </div>
                       )}
 
@@ -1245,7 +1669,7 @@ export const ReportFormSection: React.FC<ReportFormSectionProps> = ({
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div>
                           <label className="block text-xs font-semibold text-slate-300 mb-1">
-                            Bank Tujuan
+                            Bank / E-Wallet Tujuan
                           </label>
                           <select
                             value={claimBank}
@@ -1296,16 +1720,24 @@ export const ReportFormSection: React.FC<ReportFormSectionProps> = ({
                       </div>
 
                       <div>
-                        <label className="block text-xs font-semibold text-slate-300 mb-1">
-                          Nomor WhatsApp Konfirmasi (Opsional)
-                        </label>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-xs font-semibold text-slate-300">
+                            Nomor WhatsApp Notifikasi (Opsional)
+                          </label>
+                          <span className="text-[10px] text-amber-400 font-medium">
+                            Dapatkan notifikasi jika ingin dapat notif saat dana cair
+                          </span>
+                        </div>
                         <input
                           type="text"
-                          placeholder="Contoh: 08123456789 (untuk notifikasi pengiriman dana)"
+                          placeholder="Contoh: 08123456789 (masukkan jika ingin dapat notif via WhatsApp)"
                           value={claimWhatsapp}
                           onChange={(e) => setClaimWhatsapp(e.target.value)}
                           className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
                         />
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Status akan menunjukkan <strong>1x24 jam reward akan masuk ke rekening/wallet pelapor</strong>. Masukkan nomor WhatsApp jika ingin mendapatkan notifikasi realtime saat reward berhasil ditransfer.
+                        </p>
                       </div>
 
                       <div className="pt-2 flex justify-end">
