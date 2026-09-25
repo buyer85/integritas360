@@ -21,7 +21,8 @@ import {
   X,
   Loader2,
   Wallet,
-  ArrowUpRight
+  ArrowUpRight,
+  UserCircle
 } from 'lucide-react';
 import { WhistleblowingReport } from '../types';
 
@@ -33,7 +34,7 @@ export const AuditorDashboard: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [selectedReport, setSelectedReport] = useState<WhistleblowingReport | null>(null);
   const [notesInput, setNotesInput] = useState('');
-  const [statusInput, setStatusInput] = useState<'baru' | 'proses' | 'valid' | 'selesai' | 'ditolak'>('proses');
+  const [statusInput, setStatusInput] = useState<WhistleblowingReport['status']>('proses');
   const [savingNote, setSavingNote] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
 
@@ -229,11 +230,12 @@ export const AuditorDashboard: React.FC = () => {
             <div className="space-y-2">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold">
                 <Eye className="w-3.5 h-3.5" />
-                PORTAL AUDITOR INDEPENDEN & INVESTIGATOR
+                Auditor
               </div>
               <div className="flex flex-wrap items-center gap-3">
                 <h1 className="text-2xl sm:text-4xl font-extrabold text-white tracking-tight">
                   {profile?.namaPT || 'Auditor Independen'}
+                  {profile?.gelarProfesi ? `, ${profile.gelarProfesi}` : ''}
                 </h1>
                 {profile?.statusVerifikasiDokumen === 'terverifikasi' && (
                   <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-xs font-bold shadow-sm shadow-emerald-500/10">
@@ -243,8 +245,10 @@ export const AuditorDashboard: React.FC = () => {
                 )}
               </div>
               <p className="text-xs sm:text-sm text-slate-400 max-w-xl">
-                Spesialisasi: <span className="text-emerald-400 font-semibold">{profile?.sektor || 'Audit Kepatuhan'}</span> •{' '}
-                Akun Terverifikasi: <span className="text-slate-300 font-mono">{user?.email}</span>
+                Spesialisasi: <span className="text-emerald-400 font-semibold">{profile?.spesialisasiAudit || profile?.sektor || 'Audit Kepatuhan & Investigasi'}</span>
+                {profile?.nomorLisensi && (
+                  <> • Izin/Lisensi: <span className="text-slate-300 font-mono font-medium">{profile.nomorLisensi}</span></>
+                )} • Akun: <span className="text-slate-300 font-mono">{user?.email}</span>
               </p>
             </div>
 
@@ -297,9 +301,19 @@ export const AuditorDashboard: React.FC = () => {
                 </button>
               </div>
 
+              <button
+                type="button"
+                onClick={() => navigate('/profile')}
+                className="px-4 py-2.5 rounded-2xl bg-slate-950/80 hover:bg-slate-900 border border-slate-800 hover:border-emerald-500/40 text-xs font-semibold text-slate-300 hover:text-white flex items-center gap-2 transition-colors cursor-pointer"
+                title="Kelola profil praktisi dan dokumen lisensi profesi"
+              >
+                <UserCircle className="w-4 h-4 text-emerald-400" />
+                <span>Profil & Lisensi</span>
+              </button>
+
               <div className="px-4 py-2.5 rounded-2xl bg-slate-950/80 border border-slate-800 text-xs font-medium text-slate-300 flex items-center gap-2">
                 <Award className="w-4 h-4 text-emerald-400" />
-                <span>Independensi & Lisensi Aktif</span>
+                <span>Independensi Terjamin</span>
               </div>
             </div>
           </div>

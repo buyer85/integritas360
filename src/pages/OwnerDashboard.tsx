@@ -8,6 +8,7 @@ import {
   updateDoc,
   deleteDoc,
   addDoc,
+  setDoc,
   increment,
   serverTimestamp
 } from 'firebase/firestore';
@@ -48,13 +49,20 @@ import { AdminBalanceOverview } from '../components/admin/AdminBalanceOverview';
 import { AdminPerusahaanTable } from '../components/admin/AdminPerusahaanTable';
 import { AdminAuditorTable } from '../components/admin/AdminAuditorTable';
 import { AdminReportsManager } from '../components/admin/AdminReportsManager';
+import { AdminPerusahaanAdminTable } from '../components/admin/AdminPerusahaanAdminTable';
 import {
   LockModal,
   EditSaldoModal,
   EditAuditorSaldoModal,
   EditProfileModal,
   EditReportModal,
-  ConfirmDeleteModal
+  ConfirmDeleteModal,
+  AddPerusahaanModal,
+  DetailPerusahaanModal,
+  NewPerusahaanData,
+  AddAdminPerusahaanModal,
+  EditAdminPerusahaanModal,
+  NewAdminPerusahaanData
 } from '../components/admin/AdminModals';
 
 interface AdminTransaction {
@@ -65,6 +73,10 @@ interface AdminTransaction {
   status: 'pending' | 'selesai' | 'ditolak';
   keterangan?: string;
   method?: string;
+  metode?: string;
+  cryptoCurrency?: string;
+  cryptoAmount?: number;
+  txHash?: string;
   bankName?: string;
   accountNumber?: string;
   holderName?: string;
@@ -88,11 +100,12 @@ export const OwnerDashboard: React.FC = () => {
 
   // Active Tab
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'perusahaan' | 'auditor' | 'laporan' | 'dokumen' | 'keuangan' | 'reward'
+    'overview' | 'perusahaan' | 'admin_perusahaan' | 'auditor' | 'laporan' | 'dokumen' | 'keuangan' | 'reward'
   >('overview');
 
   // Core Data States
   const [perusahaanList, setPerusahaanList] = useState<UserProfile[]>([]);
+  const [adminPerusahaanList, setAdminPerusahaanList] = useState<UserProfile[]>([]);
   const [auditorList, setAuditorList] = useState<UserProfile[]>([]);
   const [reports, setReports] = useState<WhistleblowingReport[]>([]);
   const [transactions, setTransactions] = useState<AdminTransaction[]>([]);
@@ -132,6 +145,14 @@ export const OwnerDashboard: React.FC = () => {
     isOpen: boolean;
     target: { type: 'user' | 'report' | 'transaksi'; id: string; name: string } | null;
   }>({ isOpen: false, target: null });
+
+  // Add & Detail Perusahaan Modal States
+  const [isAddPerusahaanOpen, setIsAddPerusahaanOpen] = useState(false);
+  const [detailPerusahaanTarget, setDetailPerusahaanTarget] = useState<UserProfile | null>(null);
+
+  // Admin Perusahaan Modal States
+  const [isAddAdminPerusahaanOpen, setIsAddAdminPerusahaanOpen] = useState(false);
+  const [editAdminPerusahaanTarget, setEditAdminPerusahaanTarget] = useState<UserProfile | null>(null);
 
   // Poster Modal State
   const [selectedPTForPoster, setSelectedPTForPoster] = useState<PosterOptions | null>(null);
@@ -243,6 +264,36 @@ export const OwnerDashboard: React.FC = () => {
       setAuditorList(list);
     });
 
+    // 3. Admin Perusahaan List
+    const qAdminPerusahaan = query(collection(db, 'users'), where('role', '==', 'admin_perusahaan'));
+    const unsubAdminPerusahaan = onSnapshot(qAdminPerusahaan, (snapshot) => {
+      const list: UserProfile[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data();
+        list.push({
+          uid: docSnap.id,
+          email: d.email || '',
+          role: 'admin_perusahaan',
+          namaPT: d.namaPT || d.perusahaanName || 'PT Terkait',
+          perusahaanId: d.perusahaanId || '',
+          perusahaanName: d.perusahaanName || '',
+          sektor: d.sektor || 'Kepatuhan Internal',
+          alamat: d.alamat || '-',
+          deskripsi: d.deskripsi || '-',
+          telepon: d.telepon || '',
+          jabatan: d.jabatan || 'Admin Kepatuhan & Investigator',
+          departemen: d.departemen || 'Divisi Kepatuhan Internal',
+          statusAkun: d.statusAkun || 'aktif',
+          picName: d.picName || '',
+          danaTersedia: 0,
+          saldo: 0,
+          isLocked: Boolean(d.isLocked || d.statusAkun === 'nonaktif'),
+          createdAt: d.createdAt
+        });
+      });
+      setAdminPerusahaanList(list);
+    });
+
     // 3. Whistleblowing Reports
     const qReports = collection(db, 'reports');
     const unsubReports = onSnapshot(qReports, (snapshot) => {
@@ -294,6 +345,10 @@ export const OwnerDashboard: React.FC = () => {
           status: d.status || 'pending',
           keterangan: d.keterangan || '',
           method: d.method || d.metode,
+          metode: d.metode || d.method,
+          cryptoCurrency: d.cryptoCurrency,
+          cryptoAmount: d.cryptoAmount !== undefined ? Number(d.cryptoAmount) : undefined,
+          txHash: d.txHash,
           bankName: d.bankName || d.bankDetails?.bankName,
           accountNumber: d.accountNumber || d.bankDetails?.accountNumber,
           holderName: d.holderName || d.bankDetails?.holderName,
@@ -314,6 +369,7 @@ export const OwnerDashboard: React.FC = () => {
     return () => {
       unsubPerusahaan();
       unsubAuditor();
+      unsubAdminPerusahaan();
       unsubReports();
       unsubTx();
     };
@@ -395,6 +451,60 @@ export const OwnerDashboard: React.FC = () => {
   };
 
   // ==========================================
+  // HANDLERS: ADD PERUSAHAAN (TAMBAH PERUSAHAAN BARU)
+  // ==========================================
+  const handleAddCompany = async (data: NewPerusahaanData) => {
+    try {
+      const docRef = await addDoc(collection(db, 'users'), {
+        role: 'perusahaan',
+        email: data.email,
+        namaPT: data.namaPT,
+        sektor: data.sektor,
+        alamat: data.alamat,
+        telepon: data.telepon,
+        picName: data.picName,
+        npwp: data.npwp,
+        deskripsi: `Entitas perusahaan ${data.namaPT} terdaftar di platform tata kelola Integritas360.`,
+        danaTersedia: data.danaTersedia,
+        saldo: data.saldo,
+        danaTerkunci: data.danaTerkunci,
+        isLocked: data.danaTerkunci > 0 && data.danaTersedia === 0,
+        statusVerifikasiDokumen: data.statusVerifikasiDokumen,
+        namaBank: data.namaBank,
+        nomorRekening: data.nomorRekening,
+        pemilikRekening: data.pemilikRekening,
+        rekeningBank: {
+          bankName: data.namaBank,
+          accountNumber: data.nomorRekening,
+          holderName: data.pemilikRekening
+        },
+        kebijakanReward: data.kebijakanReward,
+        createdAt: serverTimestamp()
+      });
+
+      // Jika ada saldo awal, catat mutasi transaksi
+      if (data.danaTersedia > 0 || data.danaTerkunci > 0) {
+        await addDoc(collection(db, 'transactions'), {
+          userId: docRef.id,
+          userName: data.namaPT,
+          type: 'deposit',
+          amount: data.danaTersedia + data.danaTerkunci,
+          status: 'selesai',
+          keterangan: 'Setoran modal kas awal pembukaan entitas perusahaan oleh Administrator',
+          processedBy: user?.email || OWNER_EMAIL,
+          createdAt: serverTimestamp()
+        });
+      }
+
+      showToast(`Perusahaan "${data.namaPT}" berhasil didaftarkan ke sistem!`);
+    } catch (err: any) {
+      console.error('Error adding company:', err);
+      showToast('Gagal menambahkan perusahaan: ' + err.message, 'error');
+      throw err;
+    }
+  };
+
+  // ==========================================
   // HANDLERS: EDIT SALDO & TOP UP PERUSAHAAN
   // ==========================================
   const handleSaveCompanySaldo = async (
@@ -472,6 +582,64 @@ export const OwnerDashboard: React.FC = () => {
       showToast(`Honorarium auditor berhasil ditambahkan sebesar Rp ${feeAmount.toLocaleString('id-ID')}!`);
     } catch (err: any) {
       showToast('Gagal menambah honorarium auditor: ' + err.message, 'error');
+    }
+  };
+
+  // ==========================================
+  // HANDLERS: ADMIN PERUSAHAAN (ADD & KELOLA)
+  // ==========================================
+  const handleAddAdminPerusahaan = async (data: NewAdminPerusahaanData) => {
+    try {
+      const generatedUid = `admin_pt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const userRef = doc(db, 'users', generatedUid);
+      await setDoc(userRef, {
+        uid: generatedUid,
+        email: data.email,
+        role: 'admin_perusahaan',
+        namaPT: data.perusahaanName,
+        picName: data.nama,
+        perusahaanId: data.perusahaanId,
+        perusahaanName: data.perusahaanName,
+        jabatan: data.jabatan,
+        departemen: data.departemen,
+        telepon: data.telepon,
+        statusAkun: 'aktif',
+        isLocked: false,
+        sektor: 'Kepatuhan Internal',
+        alamat: 'Indonesia',
+        deskripsi: `Petugas Admin Kepatuhan ${data.perusahaanName}`,
+        danaTersedia: 0,
+        saldo: 0,
+        createdAt: serverTimestamp()
+      });
+      showToast(`Admin ${data.nama} untuk ${data.perusahaanName} berhasil ditambahkan!`);
+    } catch (err: any) {
+      showToast('Gagal menambahkan admin perusahaan: ' + err.message, 'error');
+    }
+  };
+
+  const handleSaveAdminPerusahaan = async (uid: string, updates: Partial<UserProfile>) => {
+    try {
+      const userRef = doc(db, 'users', uid);
+      await updateDoc(userRef, updates);
+      showToast('Data Admin Perusahaan berhasil diperbarui!');
+    } catch (err: any) {
+      showToast('Gagal memperbarui admin perusahaan: ' + err.message, 'error');
+    }
+  };
+
+  const handleToggleStatusAdminPerusahaan = async (admin: UserProfile) => {
+    try {
+      const currentActive = (admin.statusAkun || 'aktif') === 'aktif' && !admin.isLocked;
+      const nextStatus = currentActive ? 'nonaktif' : 'aktif';
+      const userRef = doc(db, 'users', admin.uid);
+      await updateDoc(userRef, {
+        statusAkun: nextStatus,
+        isLocked: !currentActive
+      });
+      showToast(`Status admin ${admin.picName || admin.email} diubah menjadi ${nextStatus.toUpperCase()}`);
+    } catch (err: any) {
+      showToast('Gagal mengubah status admin: ' + err.message, 'error');
     }
   };
 
@@ -779,6 +947,22 @@ export const OwnerDashboard: React.FC = () => {
             </span>
           </button>
 
+          {/* TAB 2.5: ADMIN PERUSAHAAN (ADD & KELOLA) */}
+          <button
+            onClick={() => setActiveTab('admin_perusahaan')}
+            className={`px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition-all cursor-pointer ${
+              activeTab === 'admin_perusahaan'
+                ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20'
+                : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4 text-cyan-400" />
+            <span>Admin Perusahaan</span>
+            <span className="px-1.5 py-0.5 rounded-full bg-slate-800 text-cyan-300 font-mono text-[10px] font-bold">
+              {adminPerusahaanList.length}
+            </span>
+          </button>
+
           {/* TAB 3: AUDITOR */}
           <button
             onClick={() => setActiveTab('auditor')}
@@ -871,6 +1055,8 @@ export const OwnerDashboard: React.FC = () => {
           <div className="space-y-6">
             <AdminPerusahaanTable
               perusahaanList={perusahaanList}
+              onAddPerusahaan={() => setIsAddPerusahaanOpen(true)}
+              onOpenDetailModal={(pt) => setDetailPerusahaanTarget(pt)}
               onOpenLockModal={(pt, action) =>
                 setLockModalState({ isOpen: true, entity: pt, action })
               }
@@ -911,6 +1097,8 @@ export const OwnerDashboard: React.FC = () => {
         {activeTab === 'perusahaan' && (
           <AdminPerusahaanTable
             perusahaanList={perusahaanList}
+            onAddPerusahaan={() => setIsAddPerusahaanOpen(true)}
+            onOpenDetailModal={(pt) => setDetailPerusahaanTarget(pt)}
             onOpenLockModal={(pt, action) =>
               setLockModalState({ isOpen: true, entity: pt, action })
             }
@@ -925,6 +1113,27 @@ export const OwnerDashboard: React.FC = () => {
               setDeleteConfirmState({
                 isOpen: true,
                 target: { type: 'user', id: pt.uid, name: pt.namaPT }
+              })
+            }
+          />
+        )}
+
+        {/* TAB CONTENT: 2.5 ADMIN PERUSAHAAN (ADD & KELOLA) */}
+        {activeTab === 'admin_perusahaan' && (
+          <AdminPerusahaanAdminTable
+            adminList={adminPerusahaanList}
+            perusahaanList={perusahaanList}
+            onAddAdmin={() => setIsAddAdminPerusahaanOpen(true)}
+            onEditAdmin={(admin) => setEditAdminPerusahaanTarget(admin)}
+            onToggleStatus={handleToggleStatusAdminPerusahaan}
+            onDeleteAdmin={(admin) =>
+              setDeleteConfirmState({
+                isOpen: true,
+                target: {
+                  type: 'user',
+                  id: admin.uid,
+                  name: `Admin PT: ${admin.picName || admin.email} (${admin.perusahaanName || 'PT'})`
+                }
               })
             }
           />
@@ -1196,6 +1405,16 @@ export const OwnerDashboard: React.FC = () => {
 
                       <div className="text-xs text-slate-400 flex flex-wrap gap-x-4 gap-y-1">
                         {tx.method && <span>Metode: <strong className="text-slate-200">{tx.method}</strong></span>}
+                        {tx.cryptoCurrency && (
+                          <span className="inline-flex items-center gap-1 text-cyan-300 bg-cyan-950/40 border border-cyan-500/30 px-2 py-0.5 rounded-lg text-[11px] font-mono">
+                            Crypto: <strong>{tx.cryptoAmount} {tx.cryptoCurrency}</strong>
+                          </span>
+                        )}
+                        {tx.txHash && (
+                          <span className="inline-flex items-center gap-1 text-amber-300 bg-amber-950/40 border border-amber-500/30 px-2 py-0.5 rounded-lg text-[11px] font-mono">
+                            TXID: <span className="max-w-[140px] truncate" title={tx.txHash}>{tx.txHash}</span>
+                          </span>
+                        )}
                         {tx.bankName && <span>Bank: <strong className="text-slate-200">{tx.bankName}</strong></span>}
                         {tx.accountNumber && (
                           <span>
@@ -1531,6 +1750,53 @@ export const OwnerDashboard: React.FC = () => {
           company={selectedPTForPoster}
         />
       )}
+
+      {/* 9. ADD PERUSAHAAN MODAL */}
+      <AddPerusahaanModal
+        isOpen={isAddPerusahaanOpen}
+        onClose={() => setIsAddPerusahaanOpen(false)}
+        onSubmit={handleAddCompany}
+      />
+
+      {/* 10. DETAIL & KELOLA PERUSAHAAN MODAL */}
+      <DetailPerusahaanModal
+        isOpen={Boolean(detailPerusahaanTarget)}
+        onClose={() => setDetailPerusahaanTarget(null)}
+        perusahaan={detailPerusahaanTarget}
+        onOpenLockModal={(pt, action) =>
+          setLockModalState({ isOpen: true, entity: pt, action })
+        }
+        onOpenEditSaldoModal={(pt) =>
+          setEditSaldoState({ isOpen: true, entity: pt })
+        }
+        onOpenEditProfileModal={(pt) =>
+          setEditProfileState({ isOpen: true, entity: pt })
+        }
+        onOpenPosterModal={openPosterModal}
+        onDeleteUser={(pt) =>
+          setDeleteConfirmState({
+            isOpen: true,
+            target: { type: 'user', id: pt.uid, name: pt.namaPT }
+          })
+        }
+      />
+
+      {/* 11. ADD ADMIN PERUSAHAAN MODAL */}
+      <AddAdminPerusahaanModal
+        isOpen={isAddAdminPerusahaanOpen}
+        onClose={() => setIsAddAdminPerusahaanOpen(false)}
+        perusahaanList={perusahaanList}
+        onSubmit={handleAddAdminPerusahaan}
+      />
+
+      {/* 12. EDIT ADMIN PERUSAHAAN MODAL */}
+      <EditAdminPerusahaanModal
+        isOpen={Boolean(editAdminPerusahaanTarget)}
+        onClose={() => setEditAdminPerusahaanTarget(null)}
+        adminUser={editAdminPerusahaanTarget}
+        perusahaanList={perusahaanList}
+        onSave={handleSaveAdminPerusahaan}
+      />
     </div>
   );
 };

@@ -1,10 +1,31 @@
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
-import firebaseConfig from '../../firebase-applet-config.json';
+import fallbackConfig from '../../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+// Dynamic App URL resolution for Local, Preview (*.vercel.app), and Production
+export const getAppUrl = () => {
+  if (typeof window !== 'undefined') return window.location.origin;
+  return import.meta.env.VITE_APP_URL || 'https://integritas360.vercel.app';
+};
+
+// Flexible config resolution supporting Vercel env variables and AI Studio applet config
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || fallbackConfig.apiKey,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || fallbackConfig.authDomain,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || fallbackConfig.projectId,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || fallbackConfig.storageBucket,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || fallbackConfig.messagingSenderId,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || fallbackConfig.appId,
+  firestoreDatabaseId: fallbackConfig.firestoreDatabaseId || '(default)',
+};
+
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+
+export const db = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
+  ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+  : getFirestore(app);
+
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
@@ -53,15 +74,3 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   return errInfo;
 }
 
-// Validation connection
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn('Firebase client is offline or network is limited.');
-    }
-  }
-}
-
-testConnection().catch(() => {});

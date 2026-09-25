@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { createUserWithEmailAndPassword, signInWithPopup } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { auth, db, googleProvider } from '../lib/firebase';
+import { auth, db, googleProvider, isOwnerEmail } from '../lib/firebase';
 import { useNavigation } from '../context/NavigationContext';
-import { Building2, Eye, EyeOff, ShieldCheck, ArrowRight, Loader2, AlertCircle, Info } from 'lucide-react';
+import { Building2, Eye, EyeOff, ShieldCheck, ArrowRight, Loader2, AlertCircle, Info, CheckCircle2, HelpCircle, MessageCircle } from 'lucide-react';
 import { UserRole } from '../types';
+import { UnauthorizedDomainModal } from '../components/UnauthorizedDomainModal';
+import { BrandLogo } from '../components/BrandLogo';
 
 const SEKTOR_OPTIONS = [
   'Manufaktur & Pabrikasi',
@@ -35,6 +37,8 @@ export const RegisterPage: React.FC = () => {
 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
+  const [showDomainModal, setShowDomainModal] = useState(false);
 
   useEffect(() => {
     if (query.type === 'auditor' || query.type === 'perusahaan') {
@@ -45,6 +49,7 @@ export const RegisterPage: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
+    setSuccessMsg('');
 
     if (!email || !password || !namaPT) {
       setErrorMsg('Harap lengkapi semua bidang bertanda wajib (*)');
@@ -58,14 +63,14 @@ export const RegisterPage: React.FC = () => {
 
     try {
       setLoading(true);
-      console.log("MULAI DAFTAR", email);
-
-      const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
-      console.log("AUTH SUKSES UID:", cred.user.uid);
+      const cleanEmail = email.trim();
+      const cred = await createUserWithEmailAndPassword(auth, cleanEmail, password);
+      const isOwner = isOwnerEmail(cleanEmail);
 
       await setDoc(doc(db, "users", cred.user.uid), {
-        email: email.trim(),
-        role: email.trim().toLowerCase() === "susidewiyuliyanti@gmail.com" ? "owner" : type,
+        email: cleanEmail,
+        picName: cleanEmail,
+        role: isOwner ? "owner" : type,
         namaPT: namaPT.trim(),
         sektor: sektor || 'Lainnya',
         alamat: alamat.trim() || '-',
@@ -74,24 +79,30 @@ export const RegisterPage: React.FC = () => {
         saldo: 0,
         createdAt: serverTimestamp()
       });
-      console.log("FIRESTORE SUKSES");
 
-      try {
-        alert("Daftar Berhasil!");
-      } catch (alertErr) {
-        console.warn("Alert blocked in iframe:", alertErr);
-      }
-      navigate("/login");
+      setSuccessMsg('Pendaftaran berhasil! Mengalihkan ke dashboard...');
+      setTimeout(() => {
+        if (isOwner) {
+          navigate("/owner");
+        } else if (type === "perusahaan") {
+          navigate("/perusahaan");
+        } else {
+          navigate("/auditor");
+        }
+      }, 900);
 
     } catch (error: any) {
       console.error("ERROR LENGKAP:", error?.code, error?.message);
-      const errMsg = `GAGAL DAFTAR: ${error?.code || 'ERROR'}\n${error?.message || 'Terjadi kesalahan'}`;
-      try {
-        alert(errMsg);
-      } catch (alertErr) {
-        console.warn("Alert blocked in iframe:", alertErr);
+      const code = error?.code || '';
+      if (code === 'auth/email-already-in-use') {
+        setErrorMsg('Email ini sudah terdaftar. Silakan gunakan email lain atau langsung Masuk di Halaman Login.');
+      } else if (code === 'auth/invalid-email') {
+        setErrorMsg('Format email tidak valid.');
+      } else if (code === 'auth/weak-password') {
+        setErrorMsg('Kata sandi terlalu lemah. Minimal 6 karakter.');
+      } else {
+        setErrorMsg(`Gagal mendaftar: ${error?.message || 'Terjadi kesalahan sistem'}`);
       }
-      setErrorMsg(`GAGAL DAFTAR: ${error?.code || 'UNKNOWN'} — ${error?.message || 'Terjadi kesalahan sistem'}`);
     } finally {
       setLoading(false);
     }
@@ -99,17 +110,17 @@ export const RegisterPage: React.FC = () => {
 
   const handleGoogleRegister = async () => {
     setErrorMsg('');
+    setSuccessMsg('');
     try {
       setLoading(true);
-      console.log("MULAI DAFTAR DENGAN GOOGLE");
       const cred = await signInWithPopup(auth, googleProvider);
-      console.log("AUTH GOOGLE SUKSES UID:", cred.user.uid);
-
       const userEmail = cred.user.email || '';
+      const isOwner = isOwnerEmail(userEmail);
+
       await setDoc(doc(db, "users", cred.user.uid), {
         email: userEmail,
-        picName: userEmail, // Otomatis email menjadi nama PIC pada profile
-        role: userEmail.toLowerCase() === "susidewiyuliyanti@gmail.com" ? "owner" : type,
+        picName: userEmail,
+        role: isOwner ? "owner" : type,
         namaPT: namaPT.trim() || cred.user.displayName || (type === 'perusahaan' ? 'Perusahaan Baru' : 'Auditor Baru'),
         sektor: sektor || 'Lainnya',
         alamat: alamat.trim() || '-',
@@ -118,15 +129,8 @@ export const RegisterPage: React.FC = () => {
         saldo: 0,
         createdAt: serverTimestamp()
       }, { merge: true });
-      console.log("FIRESTORE SUKSES GOOGLE");
 
-      try {
-        alert("Daftar dengan Google Berhasil!");
-      } catch (alertErr) {
-        console.warn("Alert blocked:", alertErr);
-      }
-
-      if (userEmail.toLowerCase() === "susidewiyuliyanti@gmail.com") {
+      if (isOwner) {
         navigate("/owner");
       } else if (type === "perusahaan") {
         navigate("/perusahaan");
@@ -135,13 +139,12 @@ export const RegisterPage: React.FC = () => {
       }
     } catch (error: any) {
       console.error("ERROR LENGKAP GOOGLE:", error?.code, error?.message);
-      const errMsg = `GAGAL DAFTAR GOOGLE: ${error?.code || 'ERROR'}\n${error?.message || 'Terjadi kesalahan'}`;
-      try {
-        alert(errMsg);
-      } catch (alertErr) {
-        console.warn("Alert blocked:", alertErr);
+      if (error?.code === 'auth/unauthorized-domain') {
+        setShowDomainModal(true);
+        setErrorMsg('Domain belum diizinkan di Firebase Authentication (auth/unauthorized-domain). Silakan gunakan formulir Email & Kata Sandi di formulir pendaftaran ini (langsung aktif 100%), atau klik "Panduan Otorisasi Domain".');
+      } else if (error?.code !== 'auth/popup-closed-by-user') {
+        setErrorMsg(`Gagal daftar dengan Google: ${error?.message || 'Terjadi kendala autentikasi'}`);
       }
-      setErrorMsg(`GAGAL DAFTAR: ${error?.code || 'UNKNOWN'} — ${error?.message || 'Terjadi kesalahan'}`);
     } finally {
       setLoading(false);
     }
@@ -153,16 +156,7 @@ export const RegisterPage: React.FC = () => {
         {/* Header */}
         <div className="text-center space-y-3">
           <div className="flex justify-center">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-500 to-amber-300 p-0.5 shadow-xl shadow-amber-500/20 overflow-hidden">
-              <div className="w-full h-full bg-slate-900 rounded-[14px] flex items-center justify-center overflow-hidden">
-                <img
-                  src="/logo.png"
-                  alt="INTEGRITAS360 Logo"
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover"
-                />
-              </div>
-            </div>
+            <BrandLogo size="lg" className="shadow-xl shadow-amber-500/20" />
           </div>
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800 border border-slate-700 text-xs font-semibold text-amber-400">
             <ShieldCheck className="w-4 h-4" />
@@ -192,6 +186,22 @@ export const RegisterPage: React.FC = () => {
           >
             <span>👉 Langsung Buat Laporan Anonim (Tanpa Registrasi)</span>
           </button>
+        </div>
+
+        {/* WhatsApp Hubungi Kami Banner */}
+        <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-950/60 to-slate-900 border border-emerald-500/40 shadow-lg text-center space-y-2">
+          <p className="text-xs text-slate-300">
+            Ingin mendaftarkan akun <strong className="text-white">Perusahaan</strong> atau <strong className="text-emerald-400">Auditor</strong>? Hubungi tim support kami langsung:
+          </p>
+          <a
+            href="https://wa.me/6287879625033?text=Halo%20Admin%20Integritas360%2C%20saya%20ingin%20mendaftarkan%20akun"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-md shadow-emerald-500/20 transition-all cursor-pointer"
+          >
+            <MessageCircle className="w-4 h-4" />
+            <span>Hubungi Kami via WhatsApp: 0878-7962-5033</span>
+          </a>
         </div>
 
         {/* Role Type Selector Tabs */}
@@ -233,6 +243,14 @@ export const RegisterPage: React.FC = () => {
           <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300 flex items-start gap-2.5">
             <AlertCircle className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
             <span>{errorMsg}</span>
+          </div>
+        )}
+
+        {/* Success banner */}
+        {successMsg && (
+          <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300 flex items-start gap-2.5">
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400 mt-0.5" />
+            <span>{successMsg}</span>
           </div>
         )}
 
@@ -393,6 +411,18 @@ export const RegisterPage: React.FC = () => {
             </svg>
             Daftar Cepat dengan Google
           </button>
+
+          {/* Quick link for unauthorized domain guidance */}
+          <div className="pt-1 text-center">
+            <button
+              type="button"
+              onClick={() => setShowDomainModal(true)}
+              className="text-[11px] text-amber-400/80 hover:text-amber-300 hover:underline flex items-center justify-center gap-1 mx-auto"
+            >
+              <HelpCircle className="w-3 h-3" />
+              <span>Info Otorisasi Domain Firebase (auth/unauthorized-domain)</span>
+            </button>
+          </div>
         </form>
 
         {/* Footer switch to login */}
@@ -405,6 +435,16 @@ export const RegisterPage: React.FC = () => {
             Masuk ke Akun
           </button>
         </div>
+
+        {/* Unauthorized Domain Modal */}
+        <UnauthorizedDomainModal
+          isOpen={showDomainModal}
+          onClose={() => setShowDomainModal(false)}
+          onUseEmailAuth={() => {
+            const submitBtn = document.getElementById('btn-submit-register');
+            submitBtn?.scrollIntoView({ behavior: 'smooth' });
+          }}
+        />
       </div>
     </div>
   );

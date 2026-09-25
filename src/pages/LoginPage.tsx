@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
-import { signInWithEmailAndPassword, signInWithPopup } from 'firebase/auth';
+import { signInWithEmailAndPassword, signInWithPopup, sendPasswordResetEmail } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { auth, db, googleProvider, OWNER_EMAIL } from '../lib/firebase';
+import { auth, db, googleProvider, isOwnerEmail } from '../lib/firebase';
 import { useNavigation } from '../context/NavigationContext';
-import { ShieldCheck, Eye, EyeOff, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
+import { ShieldCheck, Eye, EyeOff, ArrowRight, Loader2, AlertCircle, HelpCircle, KeyRound, CheckCircle2, UserCheck, MessageCircle } from 'lucide-react';
 import { UserRole } from '../types';
+import { UnauthorizedDomainModal } from '../components/UnauthorizedDomainModal';
+import { BrandLogo } from '../components/BrandLogo';
 
 export const LoginPage: React.FC = () => {
   const { navigate } = useNavigation();
@@ -13,45 +15,56 @@ export const LoginPage: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
+  const [showDomainModal, setShowDomainModal] = useState(false);
+  const [resetModalOpen, setResetModalOpen] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetSuccess, setResetSuccess] = useState('');
+  const [resetError, setResetError] = useState('');
 
   const routeByRole = async (uid: string, userEmail: string | null) => {
-    const isOwnerEmail = userEmail?.toLowerCase() === OWNER_EMAIL.toLowerCase();
+    const isOwner = isOwnerEmail(userEmail);
 
-    const userRef = doc(db, 'users', uid);
-    const snap = await getDoc(userRef);
+    let role: UserRole = isOwner ? 'owner' : 'perusahaan';
 
-    let role: UserRole = 'perusahaan';
+    try {
+      const userRef = doc(db, 'users', uid);
+      const snap = await getDoc(userRef);
 
-    if (snap.exists()) {
-      role = snap.data()?.role as UserRole;
-      if (!snap.data()?.picName && userEmail) {
-        await setDoc(userRef, { picName: userEmail }, { merge: true });
+      if (snap.exists()) {
+        const data = snap.data();
+        role = (data?.role as UserRole) || role;
+        if (!data?.picName && userEmail) {
+          await setDoc(userRef, { picName: userEmail }, { merge: true }).catch(() => {});
+        }
+      } else {
+        // First-time doc creation (e.g. from Google login)
+        await setDoc(userRef, {
+          email: userEmail || '',
+          picName: userEmail || '',
+          role: isOwner ? 'owner' : 'perusahaan',
+          namaPT: isOwner ? 'INTEGRITAS360 Admin' : 'Pengguna Baru',
+          sektor: isOwner ? 'Dewan Pengawas' : 'Umum',
+          alamat: '-',
+          deskripsi: '-',
+          danaTersedia: 0,
+          saldo: 0,
+          createdAt: serverTimestamp(),
+        }).catch((err) => console.warn('Could not create initial user document:', err));
       }
-    } else {
-      // First-time doc creation (e.g. from Google login)
-      role = isOwnerEmail ? 'owner' : 'perusahaan';
-      await setDoc(userRef, {
-        email: userEmail || '',
-        picName: userEmail || '', // Otomatis email menjadi nama PIC pada profile
-        role,
-        namaPT: isOwnerEmail ? 'INTEGRITAS360 Admin' : 'Pengguna Baru',
-        sektor: isOwnerEmail ? 'Dewan Pengawas' : 'Umum',
-        alamat: '-',
-        deskripsi: '-',
-        danaTersedia: 0,
-        saldo: 0,
-        createdAt: serverTimestamp(),
-      });
+    } catch (firestoreErr) {
+      console.warn('Firestore doc read error on login, falling back to role:', firestoreErr);
     }
 
-    if (isOwnerEmail) {
+    if (isOwner) {
       role = 'owner';
     }
 
     if (role === 'owner') {
       navigate('/owner');
-    } else if (role === 'perusahaan') {
-      navigate('/perusahaan');
+    } else if (role === 'admin_perusahaan') {
+      navigate('/admin-perusahaan');
     } else if (role === 'auditor') {
       navigate('/auditor');
     } else {
@@ -62,22 +75,38 @@ export const LoginPage: React.FC = () => {
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
+    setSuccessMsg('');
 
-    if (!email || !password) {
+    const cleanEmail = email.trim();
+    if (!cleanEmail || !password) {
       setErrorMsg('Harap masukkan email dan kata sandi.');
       return;
     }
 
     try {
       setLoading(true);
-      const res = await signInWithEmailAndPassword(auth, email.trim(), password);
+      const res = await signInWithEmailAndPassword(auth, cleanEmail, password);
       await routeByRole(res.user.uid, res.user.email);
     } catch (err: any) {
       console.error('Login error:', err);
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        setErrorMsg('Email atau kata sandi tidak cocok. Jika belum memiliki akun, silakan daftar terlebih dahulu.');
+      const code = err.code || '';
+      if (
+        code === 'auth/user-not-found' ||
+        code === 'auth/wrong-password' ||
+        code === 'auth/invalid-credential' ||
+        code === 'auth/invalid-login-credentials'
+      ) {
+        setErrorMsg('Email atau kata sandi tidak cocok. Jika butuh bantuan atau pendaftaran akun, silakan hubungi kami via WhatsApp.');
+      } else if (code === 'auth/invalid-email') {
+        setErrorMsg('Format alamat email tidak valid.');
+      } else if (code === 'auth/user-disabled') {
+        setErrorMsg('Akun ini telah dinonaktifkan oleh administrator.');
+      } else if (code === 'auth/too-many-requests') {
+        setErrorMsg('Terlalu banyak percobaan gagal. Silakan tunggu beberapa saat atau atur ulang kata sandi.');
+      } else if (code === 'auth/network-request-failed') {
+        setErrorMsg('Koneksi internet bermasalah. Periksa jaringan Anda dan coba lagi.');
       } else {
-        setErrorMsg(err.message || 'Gagal masuk. Periksa koneksi atau kredensial Anda.');
+        setErrorMsg(err.message || 'Gagal masuk. Periksa kembali email dan kata sandi Anda.');
       }
     } finally {
       setLoading(false);
@@ -86,17 +115,56 @@ export const LoginPage: React.FC = () => {
 
   const handleGoogleLogin = async () => {
     setErrorMsg('');
+    setSuccessMsg('');
     try {
       setLoading(true);
       const res = await signInWithPopup(auth, googleProvider);
       await routeByRole(res.user.uid, res.user.email);
     } catch (err: any) {
       console.error('Google Sign In error:', err);
-      if (err.code !== 'auth/popup-closed-by-user') {
-        setErrorMsg('Login dengan Google dibatalkan atau terkendala.');
+      if (err.code === 'auth/unauthorized-domain') {
+        setShowDomainModal(true);
+        setErrorMsg('Domain web aplikasi ini belum didaftarkan di Firebase Authentication (auth/unauthorized-domain). Silakan gunakan login Email & Kata Sandi di atas (100% aktif), atau klik "Panduan Otorisasi Domain".');
+      } else if (err.code === 'auth/popup-closed-by-user') {
+        setErrorMsg('Proses login Google dibatalkan.');
+      } else if (err.code === 'auth/cancelled-popup-request') {
+        // Ignore duplicate popup
+      } else if (err.code === 'auth/popup-blocked') {
+        setErrorMsg('Popup Google diblokir oleh browser. Harap izinkan popup untuk situs ini.');
+      } else {
+        setErrorMsg(err.message || 'Gagal masuk dengan akun Google.');
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handlePasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setResetError('');
+    setResetSuccess('');
+
+    const targetEmail = resetEmail.trim() || email.trim();
+    if (!targetEmail) {
+      setResetError('Harap masukkan alamat email Anda.');
+      return;
+    }
+
+    try {
+      setResetLoading(true);
+      await sendPasswordResetEmail(auth, targetEmail);
+      setResetSuccess(`Link instruksi reset kata sandi telah dikirim ke ${targetEmail}. Periksa folder Kotak Masuk atau Spam Anda.`);
+    } catch (err: any) {
+      console.error('Password reset error:', err);
+      if (err.code === 'auth/user-not-found') {
+        setResetError('Email ini belum terdaftar di sistem. Silakan lakukan pendaftaran akun.');
+      } else if (err.code === 'auth/invalid-email') {
+        setResetError('Format email tidak valid.');
+      } else {
+        setResetError(err.message || 'Gagal mengirim email reset kata sandi.');
+      }
+    } finally {
+      setResetLoading(false);
     }
   };
 
@@ -106,29 +174,43 @@ export const LoginPage: React.FC = () => {
         {/* Header */}
         <div className="text-center space-y-3">
           <div className="flex justify-center">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-500 to-amber-300 p-0.5 shadow-xl shadow-amber-500/20 overflow-hidden">
-              <div className="w-full h-full bg-slate-900 rounded-[14px] flex items-center justify-center overflow-hidden">
-                <img
-                  src="/logo.png"
-                  alt="INTEGRITAS360 Logo"
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover"
-                />
-              </div>
-            </div>
+            <BrandLogo size="lg" className="shadow-xl shadow-amber-500/20" />
           </div>
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800 border border-slate-700 text-xs font-semibold text-amber-400">
             <ShieldCheck className="w-4 h-4" />
             Portal Masuk INTEGRITAS360
           </div>
           <h2 className="text-2xl sm:text-3xl font-extrabold text-white">Masuk ke Sistem</h2>
+          <p className="text-xs text-slate-400">
+            Gunakan akun email terdaftar atau akun Google Anda untuk mengakses portal.
+          </p>
         </div>
 
         {/* Error Notification */}
         {errorMsg && (
-          <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300 flex items-start gap-2.5">
-            <AlertCircle className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
-            <span>{errorMsg}</span>
+          <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300 space-y-2">
+            <div className="flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
+              <span>{errorMsg}</span>
+            </div>
+            {errorMsg.includes('unauthorized-domain') && (
+              <button
+                type="button"
+                onClick={() => setShowDomainModal(true)}
+                className="w-full mt-1 py-1.5 px-3 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <HelpCircle className="w-3.5 h-3.5" />
+                Buka Panduan Otorisasi Domain & Salin Alamat Web
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Success Notification */}
+        {successMsg && (
+          <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300 flex items-start gap-2.5">
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400 mt-0.5" />
+            <span>{successMsg}</span>
           </div>
         )}
 
@@ -151,6 +233,18 @@ export const LoginPage: React.FC = () => {
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="block text-xs font-semibold text-slate-300">Kata Sandi</label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setResetEmail(email);
+                    setResetError('');
+                    setResetSuccess('');
+                    setResetModalOpen(true);
+                  }}
+                  className="text-[11px] text-amber-400 hover:underline"
+                >
+                  Lupa kata sandi?
+                </button>
               </div>
               <div className="relative">
                 <input
@@ -225,22 +319,105 @@ export const LoginPage: React.FC = () => {
             </svg>
             Masuk dengan Google
           </button>
-        </div>
 
-        {/* Link to Register */}
-        <div className="text-center text-xs text-slate-400 space-y-1">
-          <p>Belum memiliki akun?</p>
-          <div className="flex items-center justify-center gap-3 font-semibold text-amber-400">
-            <button onClick={() => navigate('/register?type=perusahaan')} className="hover:underline">
-              Daftar Perusahaan (PT)
-            </button>
-            <span>•</span>
-            <button onClick={() => navigate('/register?type=auditor')} className="hover:underline">
-              Daftar Auditor
+          {/* Quick link for unauthorized domain guidance */}
+          <div className="pt-1 text-center">
+            <button
+              type="button"
+              onClick={() => setShowDomainModal(true)}
+              className="text-[11px] text-amber-400/80 hover:text-amber-300 hover:underline flex items-center justify-center gap-1 mx-auto"
+            >
+              <HelpCircle className="w-3 h-3" />
+              <span>Info Otorisasi Domain Firebase (auth/unauthorized-domain)</span>
             </button>
           </div>
         </div>
+
+        {/* Hubungi Kami WhatsApp (Tombol Daftar di-hide sementara) */}
+        <div className="text-center text-xs text-slate-400 space-y-2">
+          <p>Belum memiliki akun atau ingin mendaftar?</p>
+          <a
+            href="https://wa.me/6287879625033?text=Halo%20Admin%20Integritas360%2C%20saya%20ingin%20mendaftar%20atau%20konsultasi%20layanan"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/40 font-bold text-xs transition-all shadow-md shadow-emerald-600/10 cursor-pointer"
+          >
+            <MessageCircle className="w-4 h-4 text-emerald-400" />
+            <span>Hubungi Kami (WhatsApp: 0878-7962-5033)</span>
+          </a>
+        </div>
+
+        {/* Unauthorized Domain Modal */}
+        <UnauthorizedDomainModal
+          isOpen={showDomainModal}
+          onClose={() => setShowDomainModal(false)}
+          onUseEmailAuth={() => {
+            const submitBtn = document.getElementById('btn-login-submit');
+            submitBtn?.scrollIntoView({ behavior: 'smooth' });
+          }}
+        />
+
+        {/* Password Reset Modal */}
+        {resetModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+            <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-2xl">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+                  <KeyRound className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Atur Ulang Kata Sandi</h3>
+                  <p className="text-[11px] text-slate-400">Kami akan mengirim link reset ke email Anda</p>
+                </div>
+              </div>
+
+              {resetError && (
+                <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-300">
+                  {resetError}
+                </div>
+              )}
+
+              {resetSuccess && (
+                <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300">
+                  {resetSuccess}
+                </div>
+              )}
+
+              <form onSubmit={handlePasswordReset} className="space-y-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">Email Terdaftar</label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="nama@email.com"
+                    value={resetEmail}
+                    onChange={(e) => setResetEmail(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setResetModalOpen(false)}
+                    className="flex-1 py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300"
+                  >
+                    Tutup
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={resetLoading}
+                    className="flex-1 py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition-colors disabled:opacity-60"
+                  >
+                    {resetLoading ? 'Mengirim...' : 'Kirim Link'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 };
+

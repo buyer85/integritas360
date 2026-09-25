@@ -34,14 +34,14 @@ export const PublicReportPage: React.FC<{ companyIdFromUrl?: string }> = ({ comp
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-emerald-400 font-bold">
               <ShieldCheck className="w-4 h-4 shrink-0" />
-              100% Bebas & Anonim: Tidak Perlu Login Akun Google
+              100% Bebas, Anonim & Terenkripsi
             </div>
             <span className="text-[10px] font-semibold bg-emerald-500/10 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/20">
               Tanpa Registrasi / Tanpa Akun
             </span>
           </div>
           <p className="text-slate-300 text-[11px] leading-relaxed">
-            Sebagai pelapor, Anda <strong>TIDAK HARUS</strong> masuk menggunakan akun Google ataupun email pribadi. Laporan Anda langsung diteruskan kepada Auditor Independen yang Anda pilih. Alamat IP, identitas perangkat, dan email Anda tidak akan pernah direkam untuk menjamin keselamatan saksi pelapor.
+            Sebagai pelapor, Anda <strong>TIDAK PERLU</strong> registrasi ataupun menggunakan identitas pribadi. Laporan Anda langsung diteruskan kepada Auditor Independen yang Anda pilih. Alamat IP, identitas perangkat, dan email Anda tidak akan pernah direkam untuk menjamin keselamatan saksi pelapor.
           </p>
         </div>
 

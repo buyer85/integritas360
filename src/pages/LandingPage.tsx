@@ -12,10 +12,12 @@ import {
   Award,
   ShieldAlert,
   BookOpen,
-  FileText
+  FileText,
+  MessageCircle
 } from 'lucide-react';
 import { ReportFormSection } from '../components/ReportFormSection';
 import { LegalModal } from '../components/LegalModal';
+import { BrandLogo } from '../components/BrandLogo';
 
 export const LandingPage: React.FC = () => {
   const { navigate } = useNavigation();
@@ -37,16 +39,7 @@ export const LandingPage: React.FC = () => {
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto space-y-6">
             <div className="flex justify-center">
-              <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-amber-500 to-amber-300 p-0.5 shadow-2xl shadow-amber-500/25">
-                <div className="w-full h-full bg-slate-900 rounded-[22px] flex items-center justify-center overflow-hidden">
-                  <img
-                    src="/logo.png"
-                    alt="INTEGRITAS360 Official Logo"
-                    referrerPolicy="no-referrer"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-              </div>
+              <BrandLogo size="xl" className="shadow-2xl shadow-amber-500/20" />
             </div>
 
             <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-semibold">
@@ -66,7 +59,7 @@ export const LandingPage: React.FC = () => {
               Menghubungkan <span className="text-amber-400 font-semibold">Perusahaan Patuh</span> dan{' '}
               <span className="text-emerald-400 font-semibold">Auditor Independen</span>.{' '}
               <span className="text-emerald-400 font-bold underline decoration-emerald-500/40 underline-offset-4">
-                Pelapor 100% Anonim Tanpa Harus Login Akun Google.
+                Pelapor 100% Anonim.
               </span>
             </p>
 
@@ -243,6 +236,16 @@ export const LandingPage: React.FC = () => {
               <BookOpen className="w-3.5 h-3.5 text-amber-400" />
               Studi Kasus Fraud
             </button>
+            <span className="text-slate-700">•</span>
+            <a
+              href="https://wa.me/6287879625033"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-emerald-400 hover:text-emerald-300 transition-colors flex items-center gap-1.5 cursor-pointer font-bold"
+            >
+              <MessageCircle className="w-3.5 h-3.5 text-emerald-400" />
+              Hubungi Kami (087879625033)
+            </a>
           </div>
 
           <p className="text-slate-500 pt-2 border-t border-slate-900">

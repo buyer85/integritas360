@@ -17,8 +17,8 @@ import {
   ChevronUp,
   AlertTriangle,
   CheckCircle2,
-  Sparkles,
-  ShieldAlert
+  ShieldAlert,
+  MessageCircle
 } from 'lucide-react';
 
 interface CaseStudy {
@@ -329,14 +329,16 @@ export const StudiKasusPage: React.FC = () => {
 
           {/* Action Buttons */}
           <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
-            <button
-              onClick={() => navigate('/register?type=perusahaan')}
-              className="px-6 py-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm shadow-xl shadow-amber-500/25 flex items-center gap-2 transition-all cursor-pointer"
+            <a
+              href="https://wa.me/6287879625033?text=Halo%20Admin%20Integritas360%2C%20saya%20tertarik%20mendaftarkan%20perusahaan"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-6 py-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-sm shadow-xl shadow-emerald-500/25 flex items-center gap-2 transition-all cursor-pointer"
             >
-              <Building2 className="w-4 h-4" />
-              Daftar Perusahaan (PT) Sekarang
+              <MessageCircle className="w-4 h-4" />
+              Hubungi Kami (WhatsApp: 0878-7962-5033)
               <ArrowRight className="w-4 h-4" />
-            </button>
+            </a>
 
             <button
               onClick={() => navigate('/lapor')}

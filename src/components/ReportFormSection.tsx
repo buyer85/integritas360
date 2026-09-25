@@ -798,20 +798,20 @@ export const ReportFormSection: React.FC<ReportFormSectionProps> = ({
             onSubmit={handleSubmitReport}
             className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 sm:p-8 space-y-5 shadow-2xl"
           >
-            {/* JAMINAN MUTLAK: BEBAS & TANPA LOGIN GOOGLE */}
+            {/* JAMINAN MUTLAK: BEBAS & TANPA LOGIN */}
             <div className="p-4 rounded-xl bg-gradient-to-r from-emerald-950/60 via-slate-950 to-slate-950 border border-emerald-500/40 flex items-start gap-3 text-xs">
               <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
               <div className="space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-bold text-emerald-300">
-                    Prinsip Dasar Anonim: Pelapor Tidak Harus Login Akun Google
+                    Prinsip Dasar Anonim: Pelapor 100% Bebas & Terenkripsi
                   </span>
                   <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-semibold px-2 py-0.5 rounded border border-emerald-500/30">
                     Bebas Akun
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-300 leading-relaxed">
-                  Laporan Anda dikirim langsung ke Auditor Independen secara terenkripsi. Anda <strong>tidak perlu login ataupun memiliki akun Google / email</strong>. Cukup kirim form dan simpan <strong>Nomor Tiket Rahasia</strong> untuk memantau proses audit & pencairan reward.
+                  Laporan Anda dikirim langsung ke Auditor Independen secara terenkripsi. Anda <strong>tidak perlu registrasi ataupun login</strong>. Cukup kirim form dan simpan <strong>Nomor Tiket Rahasia</strong> untuk memantau proses audit & pencairan reward.
                 </p>
               </div>
             </div>

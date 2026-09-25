@@ -33,13 +33,21 @@ import {
   AlertCircle,
   FileCheck,
   Send,
-  Info
+  Info,
+  ArrowDownLeft,
+  ArrowUpRight,
+  Sliders,
+  DollarSign,
+  RefreshCw,
+  CreditCard
 } from 'lucide-react';
 import { UserProfile, WhistleblowingReport } from '../types';
 import { PosterModal } from '../components/PosterModal';
+import { QrisStaticCard } from '../components/QrisStaticCard';
+import { NowPaymentsModal } from '../components/NowPaymentsModal';
 
 export const PerusahaanDashboard: React.FC = () => {
-  const { user, profile: authProfile, loading: authLoading } = useAuth();
+  const { user, profile: authProfile, loading: authLoading, role } = useAuth();
   const { navigate } = useNavigation();
 
   const [companyProfile, setCompanyProfile] = useState<UserProfile | null>(authProfile);
@@ -54,6 +62,27 @@ export const PerusahaanDashboard: React.FC = () => {
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
+  // Modal Lock / Unlock Saldo State
+  const [showLockModal, setShowLockModal] = useState(false);
+  const [lockAmount, setLockAmount] = useState<number>(1000000);
+  const [lockActionType, setLockActionType] = useState<'lock' | 'unlock'>('lock');
+  const [processingLock, setProcessingLock] = useState(false);
+  const [lockError, setLockError] = useState('');
+
+  // Modal Deposit Saldo State (QRIS & NOWPayments)
+  const [showDepositModal, setShowDepositModal] = useState(false);
+  const [showNowPaymentsModal, setShowNowPaymentsModal] = useState(false);
+  const [depositTab, setDepositTab] = useState<'qris' | 'nowpayments' | 'bank'>('qris');
+  const [depositAmount, setDepositAmount] = useState<number>(5000000);
+  const [depositMethod, setDepositMethod] = useState('QRIS Statis Nasional (INTEGRITAS360)');
+  const [processingDeposit, setProcessingDeposit] = useState(false);
+
+  // Modal Kebijakan Reward (Etik & Finansial min 2%)
+  const [showRewardPolicyModal, setShowRewardPolicyModal] = useState(false);
+  const [policyEtikNominal, setPolicyEtikNominal] = useState<number>(2500000);
+  const [policyFinansialPersen, setPolicyFinansialPersen] = useState<number>(2);
+  const [savingPolicy, setSavingPolicy] = useState(false);
+
   // Live Timer Ticker for 24h Countdown & Auto-Release
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -65,10 +94,14 @@ export const PerusahaanDashboard: React.FC = () => {
 
   // Route protection
   useEffect(() => {
-    if (!authLoading && !user) {
-      navigate('/login');
+    if (!authLoading) {
+      if (!user) {
+        navigate('/login');
+      } else if (role === 'auditor') {
+        navigate('/auditor');
+      }
     }
-  }, [user, authLoading, navigate]);
+  }, [user, authLoading, role, navigate]);
 
   // Realtime onSnapshot doc users/{uid}
   useEffect(() => {
@@ -80,6 +113,10 @@ export const PerusahaanDashboard: React.FC = () => {
       (snapshot) => {
         if (snapshot.exists()) {
           const data = snapshot.data();
+          if (data.role === 'auditor') {
+            navigate('/auditor');
+            return;
+          }
           setCompanyProfile({
             uid: user.uid,
             email: data.email || user.email || '',
@@ -92,8 +129,14 @@ export const PerusahaanDashboard: React.FC = () => {
             saldo: Number(data.saldo || 0),
             danaTerkunci: data.danaTerkunci !== undefined ? Number(data.danaTerkunci) : Number(data.danaTersedia || 0),
             statusVerifikasiDokumen: data.statusVerifikasiDokumen,
+            kebijakanReward: data.kebijakanReward || { rewardKasusEtik: 2500000, persenFinansial: 2, minPersenFinansial: 2 },
             createdAt: data.createdAt,
           });
+
+          if (data.kebijakanReward) {
+            setPolicyEtikNominal(Number(data.kebijakanReward.rewardKasusEtik || 2500000));
+            setPolicyFinansialPersen(Math.max(2, Number(data.kebijakanReward.persenFinansial || 2)));
+          }
         }
       },
       (error) => {
@@ -163,8 +206,192 @@ export const PerusahaanDashboard: React.FC = () => {
   }, [user]);
 
   const namaPT = companyProfile?.namaPT || 'PT Anda';
-  const danaTersedia = Number(companyProfile?.danaTersedia || 0);
-  const danaTerkunci = companyProfile?.danaTerkunci !== undefined ? Number(companyProfile.danaTerkunci) : danaTersedia;
+  const saldoTerbuka = Number(companyProfile?.saldo || 0);
+  const danaTerkunci = Number(companyProfile?.danaTerkunci !== undefined ? companyProfile.danaTerkunci : companyProfile?.danaTersedia || 0);
+  const danaTersedia = danaTerkunci;
+  const totalAset = saldoTerbuka + danaTerkunci;
+
+  // HANDLER: KUNCI / BUKA SALDO PERUSAHAAN
+  const handleLockSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLockError('');
+    if (!user || lockAmount <= 0) return;
+
+    if (lockActionType === 'lock') {
+      if (lockAmount > saldoTerbuka) {
+        setLockError(`Saldo terbuka tidak mencukupi untuk dikunci. Saldo terbuka saat ini: Rp ${saldoTerbuka.toLocaleString('id-ID')}`);
+        return;
+      }
+    } else {
+      if (lockAmount > danaTerkunci) {
+        setLockError(`Dana terkunci tidak mencukupi untuk dibuka. Dana terkunci saat ini: Rp ${danaTerkunci.toLocaleString('id-ID')}`);
+        return;
+      }
+    }
+
+    try {
+      setProcessingLock(true);
+      const userRef = doc(db, 'users', user.uid);
+
+      if (lockActionType === 'lock') {
+        // Pindahkan dari Saldo Terbuka -> Dana Terkunci & Dana Tersedia
+        await updateDoc(userRef, {
+          saldo: increment(-lockAmount),
+          danaTerkunci: increment(lockAmount),
+          danaTersedia: increment(lockAmount),
+        });
+
+        await addDoc(collection(db, 'transactions'), {
+          userId: user.uid,
+          userName: namaPT,
+          type: 'lock',
+          amount: lockAmount,
+          status: 'selesai',
+          keterangan: `Kunci dana penjaminan whistleblowing: Rp ${lockAmount.toLocaleString('id-ID')} (Saldo Terbuka berkurang otomatis)`,
+          createdAt: serverTimestamp(),
+        });
+
+        setActionFeedback({
+          type: 'success',
+          message: `Saldo sebesar Rp ${lockAmount.toLocaleString('id-ID')} berhasil dikunci! Saldo terbuka otomatis menyesuaikan menjadi Rp ${(saldoTerbuka - lockAmount).toLocaleString('id-ID')}.`
+        });
+      } else {
+        // Pindahkan dari Dana Terkunci -> Saldo Terbuka
+        await updateDoc(userRef, {
+          saldo: increment(lockAmount),
+          danaTerkunci: increment(-lockAmount),
+          danaTersedia: increment(-lockAmount),
+        });
+
+        await addDoc(collection(db, 'transactions'), {
+          userId: user.uid,
+          userName: namaPT,
+          type: 'unlock',
+          amount: lockAmount,
+          status: 'selesai',
+          keterangan: `Buka kunci dana penjaminan: Rp ${lockAmount.toLocaleString('id-ID')} dikembalikan ke Saldo Terbuka`,
+          createdAt: serverTimestamp(),
+        });
+
+        setActionFeedback({
+          type: 'success',
+          message: `Dana sebesar Rp ${lockAmount.toLocaleString('id-ID')} berhasil dibuka dan dikembalikan ke Saldo Terbuka!`
+        });
+      }
+
+      setShowLockModal(false);
+    } catch (err: any) {
+      setLockError(err.message || 'Gagal mengubah status kunci dana.');
+    } finally {
+      setProcessingLock(false);
+    }
+  };
+
+  // HANDLER: DEPOSIT SALDO (QRIS & BANK) - Menunggu Verifikasi Administrator
+  const handleDepositSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || depositAmount <= 0) return;
+
+    try {
+      setProcessingDeposit(true);
+      await addDoc(collection(db, 'transactions'), {
+        userId: user.uid,
+        userName: namaPT,
+        type: 'deposit',
+        amount: depositAmount,
+        status: 'pending',
+        metode: depositMethod,
+        keterangan: `Deposit saldo perusahaan via ${depositMethod}: Rp ${depositAmount.toLocaleString('id-ID')} (Menunggu verifikasi Administrator)`,
+        createdAt: serverTimestamp(),
+      });
+
+      setShowDepositModal(false);
+      setActionFeedback({
+        type: 'success',
+        message: `Permintaan deposit Rp ${depositAmount.toLocaleString('id-ID')} berhasil diajukan! Semua transaksi akan diverifikasi oleh Administrator sebelum saldo aktif ditambahkan.`
+      });
+    } catch (err: any) {
+      setActionFeedback({
+        type: 'error',
+        message: 'Gagal mengajukan deposit: ' + err.message
+      });
+    } finally {
+      setProcessingDeposit(false);
+    }
+  };
+
+  // HANDLER: NOWPAYMENTS CRYPTO DEPOSIT CONFIRMATION
+  const handleNowPaymentsConfirm = async (cryptoInfo: {
+    cryptoCurrency: string;
+    cryptoAmount: number;
+    txHash: string;
+    apiKeyUsed: string;
+  }) => {
+    if (!user || depositAmount <= 0) return;
+
+    try {
+      setProcessingDeposit(true);
+      await addDoc(collection(db, 'transactions'), {
+        userId: user.uid,
+        userName: namaPT,
+        type: 'deposit',
+        amount: depositAmount,
+        status: 'pending',
+        metode: `NOWPayments (${cryptoInfo.cryptoCurrency})`,
+        cryptoCurrency: cryptoInfo.cryptoCurrency,
+        cryptoAmount: cryptoInfo.cryptoAmount,
+        txHash: cryptoInfo.txHash,
+        keterangan: `Deposit Crypto via NOWPayments: ${cryptoInfo.cryptoAmount} ${cryptoInfo.cryptoCurrency} (TXID: ${cryptoInfo.txHash}) - Menunggu verifikasi Administrator`,
+        createdAt: serverTimestamp(),
+      });
+
+      setShowNowPaymentsModal(false);
+      setShowDepositModal(false);
+      setActionFeedback({
+        type: 'success',
+        message: `Konfirmasi deposit crypto sebesar ${cryptoInfo.cryptoAmount} ${cryptoInfo.cryptoCurrency} (setara Rp ${depositAmount.toLocaleString('id-ID')}) berhasil dikirim! Administrator akan memverifikasi TXID blockchain sebelum saldo aktif ditambahkan.`
+      });
+    } catch (err: any) {
+      setActionFeedback({
+        type: 'error',
+        message: 'Gagal konfirmasi pembayaran crypto: ' + err.message
+      });
+    } finally {
+      setProcessingDeposit(false);
+    }
+  };
+
+  // HANDLER: SIMPAN KEBIJAKAN REWARD PERUSAHAAN (ETIK & FINANSIAL MIN 2%)
+  const handleSaveRewardPolicy = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    if (policyFinansialPersen < 2) {
+      alert('Regulasi Wajib: Persentase reward kasus finansial minimal adalah 2% dari nilai kerugian.');
+      return;
+    }
+
+    try {
+      setSavingPolicy(true);
+      const userRef = doc(db, 'users', user.uid);
+      await updateDoc(userRef, {
+        kebijakanReward: {
+          rewardKasusEtik: Number(policyEtikNominal),
+          persenFinansial: Number(policyFinansialPersen),
+          minPersenFinansial: 2
+        }
+      });
+
+      setShowRewardPolicyModal(false);
+      setActionFeedback({
+        type: 'success',
+        message: `Kebijakan reward berhasil diperbarui (Kasus Etik: Rp ${Number(policyEtikNominal).toLocaleString('id-ID')}, Kasus Finansial: ${policyFinansialPersen}% - min 2%).`
+      });
+    } catch (err: any) {
+      alert('Gagal menyimpan kebijakan reward: ' + err.message);
+    } finally {
+      setSavingPolicy(false);
+    }
+  };
 
   // Format Remaining Time Helper
   const formatRemainingTime = (deadlineIso?: string) => {
@@ -405,179 +632,300 @@ export const PerusahaanDashboard: React.FC = () => {
     return true;
   });
 
+  const countMenungguAmbil = reports.filter((r) => r.companyCaseStatus === 'menunggu_ambil' || (r.status === 'valid' && !r.takenAt)).length;
+  const countSedangInvestigasi = reports.filter((r) => r.companyCaseStatus === 'kasus_diambil' && !r.rewardReleased).length;
+  const countSelesai = reports.filter((r) => r.rewardReleased || r.status === 'selesai').length;
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 py-8 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-7xl mx-auto space-y-8">
-        {/* Top Company Header Card */}
-        <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden">
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* Top Company Executive Header Card */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-7 shadow-xl relative overflow-hidden">
           <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500/5 rounded-full blur-3xl pointer-events-none" />
 
-          <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-            <div className="space-y-2">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-semibold">
-                <Building2 className="w-3.5 h-3.5" />
-                PORTAL RESMI PERUSAHAAN (PT)
+          <div className="relative flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+            <div className="flex items-start gap-4">
+              {/* Corporate Monogram Emblem */}
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-slate-800 via-slate-800 to-slate-700 border border-slate-700 flex items-center justify-center font-black text-amber-400 text-lg shadow-md shrink-0">
+                {(namaPT || 'PT').replace(/PT|CV|\./gi, '').trim().slice(0, 2).toUpperCase() || 'PT'}
               </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <h1 className="text-2xl sm:text-4xl font-extrabold text-white tracking-tight">
-                  {namaPT}
-                </h1>
-                {companyProfile?.statusVerifikasiDokumen === 'terverifikasi' && (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-xs font-bold shadow-sm shadow-emerald-500/10">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                    Terverifikasi
-                  </span>
-                )}
+
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-semibold font-mono uppercase tracking-wider">
+                    <Building2 className="w-3.5 h-3.5" />
+                    perusahaan
+                  </div>
+                  {companyProfile?.statusVerifikasiDokumen === 'terverifikasi' ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Kepatuhan Terverifikasi ISO 37002
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-medium">
+                      <Clock className="w-3.5 h-3.5" />
+                      Status Kepatuhan: Review
+                    </span>
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+                    {namaPT}
+                  </h1>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400 font-medium">
+                    <span>Sektor: <strong className="text-slate-200">{companyProfile?.sektor || '-'}</strong></span>
+                    <span className="text-slate-700">·</span>
+                    <span>Alamat: <span className="text-slate-300">{companyProfile?.alamat || '-'}</span></span>
+                    <span className="text-slate-700">·</span>
+                    <span>PIC: <span className="text-slate-300">{companyProfile?.picName || user?.email}</span></span>
+                    {companyProfile?.npwp && (
+                      <>
+                        <span className="text-slate-700">·</span>
+                        <span>NPWP: <span className="text-slate-300 font-mono">{companyProfile.npwp}</span></span>
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
-              <p className="text-xs sm:text-sm text-slate-400 max-w-xl">
-                Sektor: <span className="text-slate-200 font-semibold">{companyProfile?.sektor || '-'}</span> •{' '}
-                Alamat: <span className="text-slate-300">{companyProfile?.alamat || '-'}</span>
-              </p>
             </div>
 
-            {/* Action: Generate Poster Whistleblowing */}
-            <div className="flex flex-wrap items-center gap-3">
+            {/* Header Actions */}
+            <div className="flex flex-wrap items-center gap-2.5 shrink-0">
               <button
                 id="btn-generate-poster-pt"
                 onClick={() => setIsPosterModalOpen(true)}
-                className="px-6 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-bold text-sm shadow-xl shadow-amber-500/20 flex items-center gap-2.5 transition-all cursor-pointer"
+                className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-md shadow-amber-500/20 flex items-center gap-2 transition-all cursor-pointer hover:scale-[1.02]"
               >
-                <QrCode className="w-5 h-5 text-slate-950" />
-                Generate Poster Whistleblowing
+                <QrCode className="w-4 h-4 text-slate-950" />
+                <span>Unduh Poster Whistleblowing</span>
+              </button>
+
+              <button
+                onClick={() => setShowRewardPolicyModal(true)}
+                className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs flex items-center gap-2 transition-colors cursor-pointer"
+                title="Kebijakan Reward Pelapor (Etik & Min 2% Finansial)"
+              >
+                <Sliders className="w-3.5 h-3.5 text-amber-400" />
+                <span>Kebijakan Reward</span>
+              </button>
+
+              <button
+                onClick={() => navigate('/profile')}
+                className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-medium text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <span>Profil & Keuangan</span>
+                <ArrowUpRight className="w-3.5 h-3.5 text-slate-400" />
               </button>
             </div>
           </div>
         </div>
 
-        {/* Realtime Saldo & Dana Lock Highlight Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* Card Saldo Lock & Dana Tersedia */}
-          <div className="md:col-span-2 bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 border border-emerald-500/30 rounded-2xl p-6 shadow-xl relative overflow-hidden space-y-4">
-            <div className="absolute top-0 right-0 p-6 opacity-10">
-              <Wallet className="w-32 h-32 text-emerald-400" />
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-                  <ShieldCheck className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-400">
-                    Saldo Lock Penjaminan Whistleblowing
-                  </h3>
-                  <p className="text-[11px] text-slate-400">Dipakai untuk rilis reward pelapor & biaya jasa auditor</p>
-                </div>
-              </div>
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-full">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                Live Sync (onSnapshot)
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-              <div className="p-4 rounded-xl bg-slate-950/80 border border-emerald-500/30">
-                <span className="text-[11px] text-emerald-400 font-semibold uppercase tracking-wider block">
-                  Dana Lock Penjaminan
+        {/* Financial & Governance Command Center Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          {/* Card 1: Saldo Kas Bebas */}
+          <div className="bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-2xl p-5 shadow-lg flex flex-col justify-between transition-all">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs font-semibold text-blue-400 uppercase tracking-wider font-mono">
+                <span className="flex items-center gap-1.5">
+                  <Wallet className="w-4 h-4 text-blue-400" />
+                  Saldo Kas Bebas
                 </span>
-                <div className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-white mt-1">
-                  Rp {danaTerkunci.toLocaleString('id-ID')}
-                </div>
-                <p className="text-[10px] text-slate-400 mt-1">
-                  Otomatis terpotong saat rilis reward + biaya auditor (Rp 150.000/kasus)
-                </p>
-              </div>
-
-              <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800">
-                <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider block">
-                  Total Dana Tersedia
+                <span className="text-[10px] text-blue-300 font-mono bg-blue-500/10 border border-blue-500/30 px-2 py-0.5 rounded">
+                  LIQUID
                 </span>
-                <div className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-emerald-300 mt-1">
-                  Rp {danaTersedia.toLocaleString('id-ID')}
-                </div>
-                <p className="text-[10px] text-slate-400 mt-1">
-                  Ditampilkan pada poster resmi whistleblowing perusahaan
-                </p>
               </div>
-            </div>
-
-            <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs">
-              <p className="text-slate-400 text-[11px] max-w-lg">
-                Ketentuan: Saat kasus dinyatakan valid oleh auditor, perusahaan wajib klik <strong>"Ambil Kasus"</strong>. Setelah sanksi karyawan ditetapkan, klik <strong>"Rilis Reward"</strong>. Bila dalam 1x24 jam belum dirilis, sistem otomatis merilisnya.
+              <div className="text-3xl font-black font-mono tracking-tight text-white">
+                Rp {saldoTerbuka.toLocaleString('id-ID')}
+              </div>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Saldo kas aktif likuid entitas. Dapat ditarik langsung ke rekening bank atau dialokasikan ke dana lock jaminan poster.
               </p>
+            </div>
+
+            <div className="mt-5 pt-3.5 border-t border-slate-800 flex items-center gap-2">
               <button
-                onClick={() => navigate('/profile')}
-                className="px-4 py-2 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold inline-flex items-center gap-2 transition-colors cursor-pointer"
+                onClick={() => setShowDepositModal(true)}
+                className="flex-1 py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-md shadow-blue-600/20 cursor-pointer"
               >
-                <Wallet className="w-4 h-4" />
-                Kelola Dompet & Saldo &rarr;
+                <ArrowDownLeft className="w-3.5 h-3.5" />
+                Deposit
+              </button>
+              <button
+                onClick={() => {
+                  setLockActionType('lock');
+                  setLockAmount(Math.min(1000000, saldoTerbuka > 0 ? saldoTerbuka : 1000000));
+                  setShowLockModal(true);
+                }}
+                disabled={saldoTerbuka <= 0}
+                className="flex-1 py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold flex items-center justify-center gap-1.5 transition-all disabled:opacity-40 cursor-pointer"
+              >
+                <Lock className="w-3.5 h-3.5 text-emerald-400" />
+                Kunci Saldo
               </button>
             </div>
           </div>
 
-          {/* Quick QR Card */}
-          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between shadow-xl">
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">
-                  Poster Whistleblowing
+          {/* Card 2: Dana Terkunci (Escrow Penjaminan Poster) */}
+          <div className="bg-slate-900 border border-slate-800 hover:border-emerald-500/30 rounded-2xl p-5 shadow-lg flex flex-col justify-between transition-all">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs font-semibold text-emerald-400 uppercase tracking-wider font-mono">
+                <span className="flex items-center gap-1.5">
+                  <Lock className="w-4 h-4 text-emerald-400" />
+                  Dana Jaminan Poster (Escrow)
                 </span>
-                <span className="text-[10px] bg-amber-500/10 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full font-semibold">
-                  1080 × 1920 HD
+                <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 font-mono bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  TERJAMIN AKTIF
                 </span>
               </div>
-              <h4 className="text-sm font-bold text-white mb-1">Siap Tempel & Cetak</h4>
+              <div className="text-3xl font-black font-mono tracking-tight text-emerald-300">
+                Rp {danaTerkunci.toLocaleString('id-ID')}
+              </div>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Poster resmi dengan border keemasan dan QR Code aktif yang langsung membuka formulir laporan rahasia.
+                Penjaminan komitmen whistleblowing resmi (ISO 37002). Tertera otomatis pada poster QR resmi perusahaan dan aman dalam rekening penjaminan.
               </p>
             </div>
 
-            <button
-              onClick={() => setIsPosterModalOpen(true)}
-              className="mt-4 w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 flex items-center justify-center gap-2 transition-colors cursor-pointer"
-            >
-              <Download className="w-4 h-4 text-amber-400" />
-              Download Poster HD
-            </button>
+            <div className="mt-5 pt-3.5 border-t border-slate-800 flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setLockActionType('unlock');
+                  setLockAmount(Math.min(1000000, danaTerkunci > 0 ? danaTerkunci : 1000000));
+                  setShowLockModal(true);
+                }}
+                disabled={danaTerkunci <= 0}
+                className="w-full py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold flex items-center justify-center gap-1.5 transition-all disabled:opacity-40 cursor-pointer"
+              >
+                <Unlock className="w-3.5 h-3.5 text-amber-400" />
+                Buka Kunci Dana
+              </button>
+            </div>
+          </div>
+
+          {/* Card 3: Kebijakan Reward & Biaya Investigasi */}
+          <div className="bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-2xl p-5 shadow-lg flex flex-col justify-between transition-all">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs font-semibold text-amber-400 uppercase tracking-wider font-mono">
+                <span className="flex items-center gap-1.5">
+                  <Sliders className="w-4 h-4 text-amber-400" />
+                  Kebijakan Reward & Audit
+                </span>
+                <span className="text-[10px] text-amber-300 font-mono bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded">
+                  ISO 37002
+                </span>
+              </div>
+              
+              <div className="space-y-1.5 pt-0.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-400">Reward Kasus Etik:</span>
+                  <span className="font-mono font-bold text-amber-400">Rp {policyEtikNominal.toLocaleString('id-ID')}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-400">Reward Kasus Finansial:</span>
+                  <span className="font-mono font-bold text-blue-400">{policyFinansialPersen}% kerugian</span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-400">Biaya Auditor Independen:</span>
+                  <span className="font-mono font-bold text-emerald-400">Rp 150.000 / kasus</span>
+                </div>
+              </div>
+
+              <div className="pt-1 text-[11px] text-slate-500 border-t border-slate-800/80">
+                Total Aset Entitas: <strong className="text-white font-mono">Rp {totalAset.toLocaleString('id-ID')}</strong>
+              </div>
+            </div>
+
+            <div className="mt-4 pt-3 border-t border-slate-800 flex items-center gap-2">
+              <button
+                onClick={() => setShowRewardPolicyModal(true)}
+                className="flex-1 py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md shadow-amber-500/20"
+              >
+                <Sliders className="w-3.5 h-3.5" />
+                Ubah Kebijakan
+              </button>
+              <button
+                onClick={() => setIsPosterModalOpen(true)}
+                className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 transition-all cursor-pointer"
+                title="Cetak Poster HD"
+              >
+                <Download className="w-3.5 h-3.5 text-amber-400" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Executive KPI Stats Bar (4 Columns) */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
+            <div>
+              <div className="text-xs text-slate-400 font-medium">Total Laporan Masuk</div>
+              <div className="text-2xl font-black font-mono text-white mt-1">{reports.length}</div>
+            </div>
+            <FileText className="w-6 h-6 text-slate-600" />
+          </div>
+
+          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
+            <div>
+              <div className="text-xs text-blue-400 font-medium">Perlu Diambil Kasus</div>
+              <div className="text-2xl font-black font-mono text-blue-300 mt-1">{countMenungguAmbil}</div>
+            </div>
+            <AlertCircle className="w-6 h-6 text-blue-500/50" />
+          </div>
+
+          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
+            <div>
+              <div className="text-xs text-amber-400 font-medium">Investigasi & SLA 24h</div>
+              <div className="text-2xl font-black font-mono text-amber-300 mt-1">{countSedangInvestigasi}</div>
+            </div>
+            <Clock className="w-6 h-6 text-amber-500/50" />
+          </div>
+
+          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
+            <div>
+              <div className="text-xs text-emerald-400 font-medium">Selesai & Dirilis</div>
+              <div className="text-2xl font-black font-mono text-emerald-300 mt-1">{countSelesai}</div>
+            </div>
+            <CheckCircle2 className="w-6 h-6 text-emerald-500/50" />
           </div>
         </div>
 
         {/* Laporan Whistleblowing Masuk untuk PT ini */}
-        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-800 pb-4">
             <div>
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <FileText className="w-5 h-5 text-blue-400" />
-                Laporan & Kasus Whistleblowing ({reports.length})
+                Berkas Investigasi & Kasus Whistleblowing
               </h3>
-              <p className="text-xs text-slate-400">
-                Alur: Diverifikasi Auditor &rarr; Perusahaan Ambil Kasus &rarr; Kenakan Sanksi &rarr; Rilis Reward (Auto 1x24 Jam)
+              <p className="text-xs text-slate-400 mt-0.5">
+                Alur ISO 37002: Verifikasi Auditor &rarr; Ambil Kasus & Buka Bukti &rarr; Sanksi Disipliner &rarr; Rilis Reward (Auto 1x24 Jam)
               </p>
             </div>
 
-            {/* Filter Tabs */}
-            <div className="flex flex-wrap items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+            {/* Filter Tabs (Segmented Control) */}
+            <div className="flex flex-wrap items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
               {[
                 { id: 'all', label: `Semua (${reports.length})` },
                 {
                   id: 'menunggu_ambil',
-                  label: `Perlu Diambil (${reports.filter((r) => r.companyCaseStatus === 'menunggu_ambil' || (r.status === 'valid' && !r.takenAt)).length})`
+                  label: `Perlu Diambil (${countMenungguAmbil})`
                 },
                 {
                   id: 'kasus_diambil',
-                  label: `Sedang Diinvestigasi (${reports.filter((r) => r.companyCaseStatus === 'kasus_diambil' && !r.rewardReleased).length})`
+                  label: `Investigasi (${countSedangInvestigasi})`
                 },
                 {
                   id: 'selesai',
-                  label: `Selesai / Dirilis (${reports.filter((r) => r.rewardReleased || r.status === 'selesai').length})`
+                  label: `Selesai (${countSelesai})`
                 }
               ].map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setReportFilter(tab.id as any)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                     reportFilter === tab.id
-                      ? 'bg-blue-600 text-white shadow'
+                      ? 'bg-blue-600 text-white font-bold shadow'
                       : 'text-slate-400 hover:text-white'
                   }`}
                 >
@@ -675,22 +1023,22 @@ export const PerusahaanDashboard: React.FC = () => {
                       </div>
 
                       {/* Status Workflow Tag */}
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 shrink-0">
                         {isNeedsTake ? (
-                          <span className="text-xs font-bold px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/40 animate-pulse flex items-center gap-1.5">
-                            <AlertCircle className="w-3.5 h-3.5 text-blue-400" />
-                            VALID DARI AUDITOR: Perlu Ambil Kasus
-                          </span>
+                          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-300 text-xs font-semibold">
+                            <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+                            Valid Auditor: Perlu Tindakan
+                          </div>
                         ) : isTakenInProgress ? (
-                          <span className="text-xs font-bold px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1.5">
+                          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-semibold">
                             <Clock className="w-3.5 h-3.5 text-amber-400 animate-spin" />
-                            KASUS DIAMBIL: Dalam Investigasi Sanksi
-                          </span>
+                            Investigasi Perusahaan (SLA 24 Jam)
+                          </div>
                         ) : (
-                          <span className="text-xs font-bold px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1.5">
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                            REWARD DIRILIS & SELESAI
-                          </span>
+                          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-semibold">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                            Reward Dirilis & Kasus Selesai
+                          </div>
                         )}
                       </div>
                     </div>
@@ -974,6 +1322,490 @@ export const PerusahaanDashboard: React.FC = () => {
           sektor: companyProfile?.sektor,
         }}
       />
+
+      {/* MODAL 1: KUNCI / BUKA SALDO PENJAMINAN */}
+      {showLockModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-7 shadow-2xl space-y-5 text-slate-100">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                  {lockActionType === 'lock' ? <Lock className="w-5 h-5" /> : <Unlock className="w-5 h-5" />}
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">
+                    {lockActionType === 'lock' ? 'Kunci Saldo Penjaminan' : 'Buka Kunci Dana'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">Alokasikan dana untuk poster & penjaminan reward</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowLockModal(false)}
+                className="text-slate-400 hover:text-white text-xs cursor-pointer p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Toggle Lock / Unlock */}
+            <div className="grid grid-cols-2 gap-2 bg-slate-950/80 p-1.5 rounded-2xl border border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setLockActionType('lock');
+                  setLockError('');
+                }}
+                className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  lockActionType === 'lock'
+                    ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Lock className="w-3.5 h-3.5" />
+                <span>Kunci Saldo</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setLockActionType('unlock');
+                  setLockError('');
+                }}
+                className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  lockActionType === 'unlock'
+                    ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Unlock className="w-3.5 h-3.5" />
+                <span>Buka Kunci Dana</span>
+              </button>
+            </div>
+
+            {/* Posisi Saldo Saat Ini */}
+            <div className="grid grid-cols-2 gap-3 p-3.5 bg-slate-950/70 rounded-2xl border border-slate-800 text-xs">
+              <div>
+                <span className="text-[10px] text-blue-400 uppercase font-bold block">Saldo Terbuka</span>
+                <span className="text-sm font-mono font-bold text-white">
+                  Rp {saldoTerbuka.toLocaleString('id-ID')}
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] text-emerald-400 uppercase font-bold block">Dana Terkunci</span>
+                <span className="text-sm font-mono font-bold text-emerald-300">
+                  Rp {danaTerkunci.toLocaleString('id-ID')}
+                </span>
+              </div>
+            </div>
+
+            <form onSubmit={handleLockSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Nominal yang Dipindahkan (Rupiah) *
+                </label>
+                <input
+                  type="number"
+                  min={100000}
+                  step={100000}
+                  required
+                  value={lockAmount}
+                  onChange={(e) => setLockAmount(Number(e.target.value))}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-base font-mono font-bold text-emerald-400 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              {/* Quick Preset Buttons */}
+              <div className="flex flex-wrap gap-2">
+                {[500000, 1000000, 2500000, 5000000].map((amt) => (
+                  <button
+                    key={amt}
+                    type="button"
+                    onClick={() => setLockAmount(amt)}
+                    className="py-1 px-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-mono text-slate-300 border border-slate-700 cursor-pointer"
+                  >
+                    Rp {(amt / 1000).toLocaleString('id-ID')}k
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setLockAmount(lockActionType === 'lock' ? saldoTerbuka : danaTerkunci)}
+                  className="py-1 px-2.5 rounded-lg bg-emerald-500/20 text-emerald-300 text-[11px] font-bold border border-emerald-500/40 cursor-pointer"
+                >
+                  Semua ({lockActionType === 'lock' ? 'Maks Saldo' : 'Maks Lock'})
+                </button>
+              </div>
+
+              {/* Live Preview Perubahan Saldo */}
+              <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-[11px] space-y-1.5">
+                <div className="font-semibold text-slate-300 flex items-center justify-between">
+                  <span>Simulasi Saldo Setelah Transaksi:</span>
+                  <span className="text-[10px] text-emerald-400">Otomatis Terkalkulasi</span>
+                </div>
+                <div className="flex items-center justify-between text-slate-400">
+                  <span>Saldo Terbuka (Bebas):</span>
+                  <span className="font-mono font-bold text-white">
+                    Rp {Math.max(0, lockActionType === 'lock' ? saldoTerbuka - lockAmount : saldoTerbuka + lockAmount).toLocaleString('id-ID')}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-slate-400">
+                  <span>Dana Terkunci (Poster Penjaminan):</span>
+                  <span className="font-mono font-bold text-emerald-300">
+                    Rp {Math.max(0, lockActionType === 'lock' ? danaTerkunci + lockAmount : danaTerkunci - lockAmount).toLocaleString('id-ID')}
+                  </span>
+                </div>
+              </div>
+
+              {lockError && (
+                <div className="p-3 rounded-xl bg-red-950/40 border border-red-500/30 text-red-300 text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{lockError}</span>
+                </div>
+              )}
+
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowLockModal(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700 cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={processingLock}
+                  className="px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-60 cursor-pointer flex items-center gap-1.5"
+                >
+                  {processingLock ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : lockActionType === 'lock' ? (
+                    <Lock className="w-3.5 h-3.5" />
+                  ) : (
+                    <Unlock className="w-3.5 h-3.5" />
+                  )}
+                  <span>{processingLock ? 'Memproses...' : lockActionType === 'lock' ? 'Kunci Saldo Sekarang' : 'Buka Kunci Dana'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: DEPOSIT SALDO PERUSAHAAN (QRIS & CRYPTO) */}
+      {showDepositModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm overflow-y-auto">
+          <div className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-7 shadow-2xl space-y-5 my-6 text-slate-100">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400">
+                  <ArrowDownLeft className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Deposit Saldo Perusahaan</h3>
+                  <p className="text-[11px] text-slate-400">Pilih metode pembayaran resmi INTEGRITAS360</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowDepositModal(false)}
+                className="text-slate-400 hover:text-white text-xs cursor-pointer p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Payment Method Selector Tabs */}
+            <div className="grid grid-cols-3 gap-2 bg-slate-950/80 p-1.5 rounded-2xl border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setDepositTab('qris')}
+                className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  depositTab === 'qris'
+                    ? 'bg-blue-500 text-white shadow-md shadow-blue-500/20'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <span>QRIS Nasional</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setDepositTab('nowpayments');
+                  setShowNowPaymentsModal(true);
+                }}
+                className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  depositTab === 'nowpayments'
+                    ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Coins className="w-3.5 h-3.5" />
+                <span>NOWPayments (Crypto)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setDepositTab('bank')}
+                className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  depositTab === 'bank'
+                    ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <CreditCard className="w-3.5 h-3.5" />
+                <span>Transfer Bank / VA</span>
+              </button>
+            </div>
+
+            {/* Content for QRIS or Bank Tab */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+              {/* Kolom Kiri: Visual Pembayaran */}
+              <div className="flex flex-col items-center">
+                {depositTab === 'qris' ? (
+                  <>
+                    <p className="text-xs font-semibold text-slate-300 mb-2 text-center">
+                      Pindai QRIS Statis Resmi (NMID: ID1026539516033)
+                    </p>
+                    <QrisStaticCard nominal={depositAmount} />
+                  </>
+                ) : (
+                  <div className="w-full space-y-3 bg-slate-950 p-4 rounded-2xl border border-slate-800 text-xs">
+                    <div className="font-bold text-amber-400 flex items-center gap-2">
+                      <CreditCard className="w-4 h-4" /> Rekening Resmi PT INTEGRITAS360
+                    </div>
+                    <div className="space-y-2 text-slate-300">
+                      <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+                        <div className="text-[10px] text-slate-400 uppercase">Bank Central Asia (BCA)</div>
+                        <div className="text-sm font-mono font-bold text-white">882-019-3821</div>
+                        <div className="text-[11px] text-slate-400">a.n. PT INTEGRITAS TIGA ENAM PULUH</div>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+                        <div className="text-[10px] text-slate-400 uppercase">Bank Mandiri</div>
+                        <div className="text-sm font-mono font-bold text-white">131-00-998822-1</div>
+                        <div className="text-[11px] text-slate-400">a.n. PT INTEGRITAS TIGA ENAM PULUH</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Kolom Kanan: Form Input Nominal & Konfirmasi */}
+              <form onSubmit={handleDepositSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Nominal Deposit (Rupiah) *
+                  </label>
+                  <input
+                    type="number"
+                    min={500000}
+                    step={500000}
+                    required
+                    value={depositAmount}
+                    onChange={(e) => setDepositAmount(Number(e.target.value))}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-base font-mono font-bold text-blue-400 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                {/* Quick Presets */}
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                    Pilihan Cepat Nominal:
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[1000000, 2500000, 5000000, 10000000, 25000000, 50000000].map((amt) => (
+                      <button
+                        key={amt}
+                        type="button"
+                        onClick={() => setDepositAmount(amt)}
+                        className={`py-1.5 px-2 rounded-lg text-xs font-mono transition-colors border cursor-pointer ${
+                          depositAmount === amt
+                            ? 'bg-blue-500/20 text-blue-400 border-blue-500/40 font-bold'
+                            : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                        }`}
+                      >
+                        +{amt / 1000000} Jt
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Metode Pembayaran
+                  </label>
+                  <select
+                    value={depositMethod}
+                    onChange={(e) => setDepositMethod(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="QRIS Statis Nasional (INTEGRITAS360)">
+                      QRIS Statis Nasional (Semua Bank & E-Wallet)
+                    </option>
+                    <option value="NOWPayments (Crypto Gateway USDT/BTC/ETH)">
+                      NOWPayments Crypto Gateway (USDT, BTC, ETH, SOL, TRX)
+                    </option>
+                    <option value="BCA Transfer Bank">BCA Transfer Rekening</option>
+                    <option value="Mandiri Transfer Bank">Mandiri Transfer Rekening</option>
+                    <option value="BRI Transfer Bank">BRI Transfer Rekening</option>
+                  </select>
+                </div>
+
+                {/* Admin Verification Requirement Notice */}
+                <div className="p-3 bg-blue-500/10 rounded-xl border border-blue-500/20 text-[11px] text-blue-200 leading-relaxed space-y-1">
+                  <div className="font-bold flex items-center gap-1.5 text-blue-300">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    Ketentuan Verifikasi Administrator:
+                  </div>
+                  <p className="text-slate-300">
+                    Semua transaksi deposit melalui QRIS, Rekening Bank, maupun Crypto NOWPayments <strong>akan diverifikasi oleh Administrator</strong> sebelum saldo aktif ditambahkan ke akun Anda.
+                  </p>
+                </div>
+
+                <div className="pt-2 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowDepositModal(false)}
+                    className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700 cursor-pointer"
+                  >
+                    Batal
+                  </button>
+
+                  {depositMethod.includes('NOWPayments') ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowNowPaymentsModal(true)}
+                      className="px-5 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-slate-950 text-xs font-bold transition-all shadow-lg shadow-cyan-500/20 cursor-pointer flex items-center gap-1.5"
+                    >
+                      <Coins className="w-4 h-4" />
+                      Buka Pembayaran Crypto
+                    </button>
+                  ) : (
+                    <button
+                      type="submit"
+                      disabled={processingDeposit}
+                      className="px-5 py-2 rounded-xl bg-blue-500 hover:bg-blue-400 text-white text-xs font-bold transition-all shadow-lg shadow-blue-500/20 disabled:opacity-60 cursor-pointer"
+                    >
+                      {processingDeposit ? 'Memproses...' : 'Konfirmasi Sudah Transfer'}
+                    </button>
+                  )}
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* NOWPAYMENTS CRYPTO MODAL */}
+      <NowPaymentsModal
+        isOpen={showNowPaymentsModal}
+        onClose={() => setShowNowPaymentsModal(false)}
+        depositAmountIdr={depositAmount}
+        onConfirmDeposit={handleNowPaymentsConfirm}
+        isProcessing={processingDeposit}
+      />
+
+      {/* MODAL 3: KEBIJAKAN BESARAN REWARD (ETIK & FINANSIAL MIN 2%) */}
+      {showRewardPolicyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm">
+          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-7 shadow-2xl space-y-5 text-slate-100">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                  <Sliders className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Kebijakan Besaran Reward Whistleblower</h3>
+                  <p className="text-[11px] text-slate-400">Pengaturan standar reward untuk kasus Etik & Finansial</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowRewardPolicyModal(false)}
+                className="text-slate-400 hover:text-white text-xs cursor-pointer p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveRewardPolicy} className="space-y-4">
+              {/* Kasus Etik */}
+              <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-2">
+                <label className="block text-xs font-bold text-white flex items-center gap-1.5">
+                  <Scale className="w-4 h-4 text-blue-400" />
+                  1. Besaran Reward Kasus Pelanggaran Etik (Nominal Tetap)
+                </label>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Diberikan kepada pelapor atas kasus non-finansial (pelecehan, gratifikasi etik, konflik kepentingan, dll).
+                </p>
+                <div className="relative mt-1">
+                  <span className="absolute left-3.5 top-2.5 text-xs text-slate-400 font-mono">Rp</span>
+                  <input
+                    type="number"
+                    min={500000}
+                    step={100000}
+                    required
+                    value={policyEtikNominal}
+                    onChange={(e) => setPolicyEtikNominal(Number(e.target.value))}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-10 pr-3.5 py-2.5 text-sm font-mono font-bold text-blue-400 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              {/* Kasus Finansial (Min 2%) */}
+              <div className="p-4 rounded-2xl bg-amber-950/20 border border-amber-500/30 space-y-2">
+                <label className="block text-xs font-bold text-amber-300 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Coins className="w-4 h-4 text-amber-400" />
+                    2. Besaran Reward Kasus Finansial (% Kerugian)
+                  </span>
+                  <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full font-bold">
+                    Regulasi: Min 2%
+                  </span>
+                </label>
+                <p className="text-[11px] text-amber-200/80 leading-relaxed">
+                  Diberikan dari persentase total estimasi kerugian finansial yang berhasil diselamatkan. Regulasi ISO 37002 / Integritas360 mewajibkan <strong>minimal 2%</strong>.
+                </p>
+                <div className="flex items-center gap-3 mt-1">
+                  <input
+                    type="number"
+                    min={2}
+                    max={20}
+                    step={0.5}
+                    required
+                    value={policyFinansialPersen}
+                    onChange={(e) => setPolicyFinansialPersen(Math.max(2, Number(e.target.value)))}
+                    className="w-32 bg-slate-900 border border-amber-500/50 rounded-xl px-3.5 py-2.5 text-base font-mono font-bold text-amber-300 focus:outline-none focus:border-amber-400"
+                  />
+                  <span className="text-sm font-bold text-slate-300">% dari Estimasi Kerugian</span>
+                </div>
+              </div>
+
+              {/* Simulasi */}
+              <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-[11px] space-y-1">
+                <div className="font-semibold text-slate-300">Contoh Kalkulasi Kasus Finansial:</div>
+                <div className="text-slate-400">
+                  Kerugian Rp 100.000.000 &rarr; Reward Pelapor: <strong>Rp {Math.round(100000000 * (policyFinansialPersen / 100)).toLocaleString('id-ID')}</strong> ({policyFinansialPersen}%)
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowRewardPolicyModal(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700 cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingPolicy}
+                  className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition-all shadow-lg shadow-amber-500/20 disabled:opacity-60 cursor-pointer flex items-center gap-1.5"
+                >
+                  {savingPolicy ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+                  <span>{savingPolicy ? 'Menyimpan...' : 'Simpan Kebijakan Reward'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
